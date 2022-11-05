@@ -24,6 +24,7 @@ params:
 
     mlp:
       units: [256, 128, 64]
+      #units: [1024, 256, 128, 64]
       activation: elu
       d2rl: False
 
@@ -59,7 +60,7 @@ params:
     grad_norm: 1.
     horizon_length: 24
     #minibatch_size: 8192
-    minibatch_size: 2048
+    minibatch_size: 4096
     #minibatch_size: 32
     mini_epochs: 5
     critic_coef: 2
@@ -67,8 +68,8 @@ params:
     seq_len: 4 # only for rnn
     bounds_loss_coef: 0.001
 
-    #max_epochs: ${resolve_default:1000,${....max_iterations}}
     max_epochs: ${resolve_default:1000,${....max_iterations}}
+    #max_epochs: ${resolve_default:2000,${....max_iterations}}
     save_best_after: 200
     score_to_win: 20000
     save_frequency: 50
