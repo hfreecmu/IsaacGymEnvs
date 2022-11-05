@@ -4,17 +4,20 @@ name: Pentapede
 physics_engine: ${..physics_engine}
 
 env:
-  numEnvs: ${resolve_default:1024,${...num_envs}}
+  #numEnvs: ${resolve_default:256,${...num_envs}}
+  numEnvs: ${resolve_default:256,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
   #maxEpisodeLength: 2000
 
   clipObservations: 5.0
-  clipActions: 1.0
+  clipActions: 2.0
+  clipDistImage: 3.0
 
   # set to True if you use camera sensors in the environment
   enableCameraSensors: True
   camera_link: "wx250s/gripper_link"
+  sphere_seg_id: 1
 
   plane:
     staticFriction: 1.0  # [-]
@@ -29,7 +32,7 @@ env:
   sphereInitState:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
-    pos: [1, 1, 2.0] # x,y,z [m]
+    pos: [2, 0, 2] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
@@ -83,6 +86,11 @@ env:
     refEnv: 0
     pos: [0, 0, 4]  # [m]
     lookat: [1., 1, 3.3]  # [m]
+
+  # camera
+  camera:
+    image_width: 128
+    image_height: 128
 
 sim:
   dt: 0.02

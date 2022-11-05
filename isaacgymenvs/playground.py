@@ -84,6 +84,7 @@ asset_file = "urdf/pentapede/urdf/pentapede.urdf"
 asset_options = gymapi.AssetOptions()
 asset_options.fix_base_link = True
 asset_options.flip_visual_attachments = False
+asset_options.use_mesh_materials = True
 
 print("Loading asset '%s' from '%s'" % (asset_file, asset_root))
 pentapede_asset = gym.load_asset(
@@ -167,11 +168,12 @@ while not gym.query_viewer_has_closed(viewer):
 
     for i in range(num_envs):
         rgb_filename = "graphics_images/rgb_env%d.png" % (i)
-        #gym.write_camera_image_to_file(sim, envs[i], camera_handles[i], gymapi.IMAGE_COLOR, rgb_filename)
+        gym.write_camera_image_to_file(sim, envs[i], camera_handles[i], gymapi.IMAGE_COLOR, rgb_filename)
         #rgb_image = gym.get_camera_image(sim, envs[i], camera_handles[i], gymapi.IMAGE_COLOR)
         #rgb_image = np.reshape(rgb_image, (image_height, image_width, 4))[:, :, 0:3]
 
         depth_image = gym.get_camera_image(sim, envs[i], camera_handles[i], gymapi.IMAGE_DEPTH)
+        print(depth_image.min(), depth_image.max())
         #depth_image[depth_image == -np.inf] = 0
         #normalized_depth = -255.0*(depth_image/np.min(depth_image + 1e-4))
         #normalized_depth_image = im.fromarray(normalized_depth.astype(np.uint8), mode="L")

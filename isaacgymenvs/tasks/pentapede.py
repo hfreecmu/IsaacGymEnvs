@@ -7,10 +7,13 @@ from isaacgym import gymapi, gymtorch
 from isaacgym.torch_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 
-
 #WARNING WARNING WARNING
 #Below only works if sphere has no degrees of freedom
 #things will break if it does
+
+#TODO arm isn't going all the way up because of clipActions set to 1
+#need to retune clipActions, clipObservations, actionScale, and dofPositionScale
+#possibly separate between arm and legs
 class Pentapede(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
@@ -18,6 +21,8 @@ class Pentapede(VecTask):
         self.cfg = cfg
 
         self.camera_link = self.cfg["env"]["camera_link"]
+        self.sphere_seg_id = self.cfg["env"]["sphere_seg_id"]
+        self.clip_dist_image = self.cfg["env"]["clipDistImage"]
         
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -97,6 +102,8 @@ class Pentapede(VecTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)
         self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
 
+        #TODO if other actor has dof, would need to view to -1 (like above) and find correct indices/handles
+        #for each one
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.default_dof_pos = torch.zeros_like(self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False)
@@ -134,7 +141,7 @@ class Pentapede(VecTask):
 
     def _create_envs(self, num_envs, spacing, num_per_row):
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-        asset_file = "urdf/pentapede/urdf/pentapede.urdf" #TODO or do we want pentapede_minimal?
+        asset_file = "urdf/pentapede/urdf/pentapede.urdf"
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
@@ -149,7 +156,6 @@ class Pentapede(VecTask):
         asset_options.thickness = 0.01
         asset_options.disable_gravity = False
         asset_options.use_mesh_materials = True
-
 
         pentapede_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         self.num_dof = self.gym.get_asset_dof_count(pentapede_asset)
@@ -176,11 +182,18 @@ class Pentapede(VecTask):
         sphere_start_pose = gymapi.Transform()
         sphere_start_pose.p = gymapi.Vec3(*self.sphere_init_state[:3])
 
+        #TODO add fov
+        camera_props = gymapi.CameraProperties()
+        camera_props.width = self.cfg["env"]["camera"]["image_width"]
+        camera_props.height = self.cfg["env"]["camera"]["image_height"]
+        camera_props.enable_tensors = True
+
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
         self.envs = []
         self.pentapede_handles = []
         self.sphere_handles = []
+        self.camera_handles = []
         self.pentapede_indices = []
         self.sphere_indices = []
 
@@ -191,15 +204,21 @@ class Pentapede(VecTask):
             
             pentapede_handle = self.gym.create_actor(env_ptr, pentapede_asset, start_pose, "pentapede", i, 1, 0)
             self.gym.set_actor_dof_properties(env_ptr, pentapede_handle, dof_props)
+            self.gym.enable_actor_dof_force_sensors(env_ptr, pentapede_handle)
             self.pentapede_handles.append(pentapede_handle)
             object_idx = self.gym.get_actor_index(env_ptr, pentapede_handle, gymapi.DOMAIN_SIM)
             self.pentapede_indices.append(object_idx)
 
-            sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 1, 0)
+            sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 1, self.sphere_seg_id)
             self.sphere_handles.append(sphere_handle)
-            box_idx = self.gym.get_actor_index(env_ptr, sphere_handle, gymapi.DOMAIN_SIM)
-            self.sphere_indices.append(box_idx)
+            sphere_idx = self.gym.get_actor_index(env_ptr, sphere_handle, gymapi.DOMAIN_SIM)
+            self.sphere_indices.append(sphere_idx)
             self.gym.set_rigid_body_color(env_ptr, sphere_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*sphere_color))
+
+            camera_handle = self.gym.create_camera_sensor(env_ptr, camera_props)
+            body_handle = self.gym.find_actor_rigid_body_handle(env_ptr, pentapede_handle, self.camera_link)
+            self.gym.attach_camera_to_body(camera_handle, env_ptr, body_handle, gymapi.Transform(), gymapi.FOLLOW_TRANSFORM)
+            self.camera_handles.append(camera_handle)
 
         for i in range(len(knee_names)):
             #TODO handle or index?
@@ -245,8 +264,25 @@ class Pentapede(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.render_all_camera_sensors(self.sim)
 
         self.camera_link_states = self.rigid_body_states[:, self.camera_link_index][:, 0:13]
+
+        seg_depth_images = []
+        for i in range(self.num_envs):
+            #TODO close values are closer to 0, do we want to make them 1 and invert?
+            #get seg image
+            seg_image = gymtorch.wrap_tensor(self.gym.get_camera_image_gpu_tensor(self.sim, self.envs[i], self.camera_handles[i], gymapi.IMAGE_SEGMENTATION))
+            #get depth image and negative as distances are negative
+            depth_image = -gymtorch.wrap_tensor(self.gym.get_camera_image_gpu_tensor(self.sim, self.envs[i], self.camera_handles[i], gymapi.IMAGE_DEPTH))
+            #clip
+            depth_image = torch.clip(depth_image, None, self.clip_dist_image)
+            #values that arent' segmented should be set to max value
+            depth_image[seg_image != self.sphere_seg_id] = self.clip_dist_image
+            #now scale between 0 and 1
+            depth_image = depth_image / self.clip_dist_image
+
+            seg_depth_images.append(depth_image)
 
         self.obs_buf[:] = compute_pentapede_observations(  # tensors
                                                         self.root_states,
