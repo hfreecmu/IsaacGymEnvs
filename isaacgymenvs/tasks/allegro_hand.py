@@ -552,10 +552,6 @@ class AllegroHand(VecTask):
 
         if apply_reset:
             goal_object_indices = self.goal_object_indices[env_ids].to(torch.int32)
-            print(self.root_state_tensor.shape)
-            print(goal_object_indices.shape)
-            print(len(env_ids))
-            exit(0)
             self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                          gymtorch.unwrap_tensor(self.root_state_tensor),
                                                          gymtorch.unwrap_tensor(goal_object_indices), len(env_ids))

@@ -26,6 +26,11 @@ class Pentapede(VecTask):
         self.dof_vel_scale = self.cfg["env"]["learn"]["dofVelocityScale"]
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
 
+        # reward scales
+        self.rew_scales = {}
+        self.rew_scales["camera_pos"] = self.cfg["env"]["learn"]["cameraPosRewardScale"]
+        self.rew_scales["torque"] = self.cfg["env"]["learn"]["torqueRewardScale"]
+
         # plane params
         self.plane_static_friction = self.cfg["env"]["plane"]["staticFriction"]
         self.plane_dynamic_friction = self.cfg["env"]["plane"]["dynamicFriction"]
@@ -49,7 +54,7 @@ class Pentapede(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
-        self.cfg["env"]["numObservations"] = 57
+        self.cfg["env"]["numObservations"] = 66
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -58,10 +63,12 @@ class Pentapede(VecTask):
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         # other
-        #self.dt = self.sim_params.dt
-        #self.max_episode_length_s = self.cfg["env"]["learn"]["episodeLength_s"]
-        #self.max_episode_length = int(self.max_episode_length_s / self.dt + 0.5)
-        self.max_episode_length = 200
+        self.dt = self.sim_params.dt
+        self.max_episode_length_s = self.cfg["env"]["learn"]["episodeLength_s"]
+        self.max_episode_length = int(self.max_episode_length_s / self.dt + 0.5)
+
+        for key in self.rew_scales.keys():
+            self.rew_scales[key] *= self.dt
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -74,16 +81,22 @@ class Pentapede(VecTask):
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         rigid_body_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
+        net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
+        torques = self.gym.acquire_dof_force_tensor(self.sim)
 
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_tensor).view(self.num_envs, -1, 13)
-        
+        self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)
+        self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
+
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.default_dof_pos = torch.zeros_like(self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False)
@@ -140,9 +153,19 @@ class Pentapede(VecTask):
 
         pentapede_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         self.num_dof = self.gym.get_asset_dof_count(pentapede_asset)
-        self.num_bodies = self.gym.get_asset_rigid_body_count(pentapede_asset)
         start_pose = gymapi.Transform()
         start_pose.p = gymapi.Vec3(*self.base_init_state[:3])
+
+        body_names = self.gym.get_asset_rigid_body_names(pentapede_asset)
+        self.dof_names = self.gym.get_asset_dof_names(pentapede_asset)
+        knee_names = [s for s in body_names if "THIGH" in s]
+        self.knee_indices = torch.zeros(len(knee_names), dtype=torch.long, device=self.device, requires_grad=False)
+
+        dof_props = self.gym.get_asset_dof_properties(pentapede_asset)
+        for i in range(self.num_dof):
+            dof_props['driveMode'][i] = gymapi.DOF_MODE_POS
+            dof_props['stiffness'][i] = self.Kp
+            dof_props['damping'][i] = self.Kd
 
         sphere_radius = self.cfg["env"]["sphereInitState"]["radius"]
         sphere_color = self.cfg["env"]["sphereInitState"]["color"]
@@ -152,14 +175,6 @@ class Pentapede(VecTask):
         sphere_asset = self.gym.create_sphere(self.sim, sphere_radius, sphere_asset_options)
         sphere_start_pose = gymapi.Transform()
         sphere_start_pose.p = gymapi.Vec3(*self.sphere_init_state[:3])
-
-        self.dof_names = self.gym.get_asset_dof_names(pentapede_asset)
-
-        dof_props = self.gym.get_asset_dof_properties(pentapede_asset)
-        for i in range(self.num_dof):
-            dof_props['driveMode'][i] = gymapi.DOF_MODE_POS
-            dof_props['stiffness'][i] = self.Kp
-            dof_props['damping'][i] = self.Kd
 
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -186,7 +201,14 @@ class Pentapede(VecTask):
             self.sphere_indices.append(box_idx)
             self.gym.set_rigid_body_color(env_ptr, sphere_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*sphere_color))
 
+        for i in range(len(knee_names)):
+            #TODO handle or index?
+            self.knee_indices[i] = self.gym.find_asset_rigid_body_index(pentapede_asset, knee_names[i])
+
+        #TODO handle or index?
         self.camera_link_index = self.gym.find_asset_rigid_body_index(pentapede_asset, self.camera_link)
+        #TODO handle or index?
+        self.base_index = self.gym.find_asset_rigid_body_index(pentapede_asset, "base")
 
     def pre_physics_step(self, actions):
         self.actions = actions.clone().to(self.device)
@@ -208,15 +230,21 @@ class Pentapede(VecTask):
         self.rew_buf[:], self.reset_buf[:] = compute_pentapede_reward(
             self.root_states,
             self.camera_link_states,
+            self.torques,
+            self.contact_forces,
             self.sphere_indices,
+            self.knee_indices,
             self.progress_buf,
+            self.rew_scales,
+            self.base_index,
             self.max_episode_length,
         )
-
     def compute_observations(self):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)  # done in step
         self.gym.refresh_rigid_body_state_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
 
         self.camera_link_states = self.rigid_body_states[:, self.camera_link_index][:, 0:13]
 
@@ -264,22 +292,43 @@ def compute_pentapede_reward(
     # tensors
     root_states,
     camera_link_states,
+    torques,
+    contact_forces,
     sphere_indices,
+    knee_indices,
     episode_lengths,
+    # Dict
+    rew_scales,
+    # other
+    base_index,
     max_episode_length
 ):
+    # (reward, reset, feet_in air, feet_air_time, episode sums)
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Dict[str, float], int, int) -> Tuple[Tensor, Tensor]
 
     sphere_pos = root_states[sphere_indices, 0:3]
     camera_pos = camera_link_states[:, 0:3]
+    
+    # camera position reward
+    camera_error = torch.sum(torch.square(sphere_pos - camera_pos), dim=1)
+    rew_cam_pos = torch.exp(-camera_error/0.25) * rew_scales["camera_pos"]
 
-    total_reward = -torch.norm(sphere_pos - camera_pos, dim=1)
-    reset = episode_lengths >= max_episode_length - 1
+    # torque penalty
+    rew_torque = torch.sum(torch.square(torques), dim=1) * rew_scales["torque"]
 
-    #TODO do I detach reward?
-    return total_reward, reset
+    total_reward = rew_cam_pos# + rew_torque
+    total_reward = torch.clip(total_reward, 0., None)
+
+    reset = torch.norm(contact_forces[:, base_index, :], dim=1) > 1.
+    reset = reset | torch.any(torch.norm(contact_forces[:, knee_indices, :], dim=2) > 1., dim=1)
+    time_out = episode_lengths >= max_episode_length - 1  # no terminal reward for time-outs
+    reset = reset | time_out
+
+    #TODO do we detach reward? Why does this work with example code?
+    return total_reward.detach(), reset
 
 
-#@torch.jit.script
+@torch.jit.script
 def compute_pentapede_observations(root_states,
                                 pentapede_indices,
                                 camera_link_states,
@@ -294,12 +343,19 @@ def compute_pentapede_observations(root_states,
                                 dof_vel_scale
                                 ):
     
-    #just care about camera position for now
+    base_quat = root_states[pentapede_indices, 3:7]
+    base_lin_vel = quat_rotate_inverse(base_quat, root_states[pentapede_indices, 7:10]) * lin_vel_scale
+    base_ang_vel = quat_rotate_inverse(base_quat, root_states[pentapede_indices, 10:13]) * ang_vel_scale
+    projected_gravity = quat_rotate(base_quat, gravity_vec)
+    
     cam_pos = camera_link_states[:, 0:3]
     dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
     dof_vel_scaled = dof_vel * dof_vel_scale
 
     obs = torch.cat((cam_pos,
+                     base_lin_vel,
+                     base_ang_vel,
+                     projected_gravity,
                      dof_pos_scaled,
                      dof_vel_scaled,
                      actions

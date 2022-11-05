@@ -7,7 +7,7 @@ env:
   numEnvs: ${resolve_default:1024,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
-  maxEpisodeLength: 2000
+  #maxEpisodeLength: 2000
 
   clipObservations: 5.0
   clipActions: 1.0
@@ -29,7 +29,7 @@ env:
   sphereInitState:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
-    pos: [2, 0.2, 2.0] # x,y,z [m]
+    pos: [1, 1, 2.0] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
@@ -65,6 +65,10 @@ env:
     wrist_rotate: 0.00
 
   learn:
+    # rewards
+    cameraPosRewardScale: 2.0
+    torqueRewardScale: -0.000025
+
     # normalization
     linearVelocityScale: 2.0
     angularVelocityScale: 0.25
@@ -72,7 +76,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 50
+    episodeLength_s: 10
 
   # viewer cam:
   viewer:
@@ -99,4 +103,4 @@ sim:
     default_buffer_size_multiplier: 5.0
     max_gpu_contact_pairs: 8388608 # 8*1024*1024
     num_subscenes: ${....num_subscenes}
-    contact_collection: 0 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (default - all contacts)
+    contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (default - all contacts)
