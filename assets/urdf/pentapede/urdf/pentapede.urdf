@@ -1827,11 +1827,13 @@
   </transmission>
   <link name="wx250s/gripper_link">
     <visual>
-      <origin rpy="0 0 1.57079632679" xyz="-0.02 0 0"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://pentapede/meshes/wx250s_7_gripper.stl" scale="0.001 0.001 0.001"/>
+        <box size="0.01 0.01 0.01" />
       </geometry>
-      <material name="black"/>
+      <material name="Cyan">
+        <color rgba="0 1.0 1.0 1.0"/>
+      </material>
     </visual>
     <collision>
       <origin rpy="0 0 1.57079632679" xyz="-0.02 0 0"/>
@@ -1843,18 +1845,6 @@
       <origin rpy="0 0 1.57079632679" xyz="0.0216310000 0.0000002516 0.0114100000"/>
       <mass value="0.072885"/>
       <inertia ixx="0.0000253700" ixy="0.0000000000" ixz="0.0000000000" iyy="0.0000183600" iyz="0.0000004340" izz="0.0000167400"/>
-    </inertial>
-  </link>
-  <joint name="ee_arm" type="fixed">
-    <axis xyz="1 0 0"/>
-    <origin rpy="0 0 0" xyz="0.043 0 0"/>
-    <parent link="wx250s/gripper_link"/>
-    <child link="wx250s/ee_arm_link"/>
-  </joint>
-  <link name="wx250s/ee_arm_link">
-    <inertial>
-      <mass value="0.001"/>
-      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
     </inertial>
   </link>
   <!-- End arm -->
