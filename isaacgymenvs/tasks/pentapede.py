@@ -20,7 +20,6 @@ from PIL import Image as im
 class Pentapede(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
-
         self.cfg = cfg
 
         self.camera_link = self.cfg["env"]["camera_link"]
@@ -64,7 +63,8 @@ class Pentapede(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
-        self.cfg["env"]["numObservations"] = 69#4165
+        #PAUL change this to 1093 to use image
+        self.cfg["env"]["numObservations"] = 69 #1093#69
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -195,11 +195,12 @@ class Pentapede(VecTask):
         sphere_start_pose = gymapi.Transform()
         sphere_start_pose.p = gymapi.Vec3(*self.sphere_init_state[:3])
 
-        #TODO add fov
+        #TODO tune fov
         camera_props = gymapi.CameraProperties()
         camera_props.width = self.cfg["env"]["camera"]["image_width"]
         camera_props.height = self.cfg["env"]["camera"]["image_height"]
         camera_props.enable_tensors = True
+        camera_props.horizontal_fov = 80
 
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -296,15 +297,15 @@ class Pentapede(VecTask):
 
         self.camera_link_states = self.rigid_body_states[:, self.camera_link_index][:, 0:13]
 
-        # PAUL UNCOMMENT THESE 4 LINES BELOW FOR IMAGES
+        # PAUL uncomment four lines below to use image
         # self.gym.render_all_camera_sensors(self.sim)
         # self.gym.start_access_image_tensors(self.sim)
         # self.seg_image_states = torch.stack(self.seg_images).float()
         # self.gym.end_access_image_tensors(self.sim)
         ###
 
-        #debug_im = self.seg_image_states[0].detach().cpu().numpy()
-        #im.fromarray(255*debug_im.astype(np.uint8), mode="L").save("graphics_images/seg_env%d.jpg" % (0))
+        # debug_im = self.seg_image_states[0].detach().cpu().numpy()
+        # im.fromarray(255*debug_im.astype(np.uint8), mode="L").save("graphics_images/seg_env%d.jpg" % (0))
         
 
         # seg_depth_images = []
@@ -446,8 +447,8 @@ def compute_pentapede_observations(root_states,
 
     dof_vel_scaled = dof_vel * dof_vel_scale
 
-    # PAUL UNCOMMENT THIS LINE AND THE ONE IN THE OBS FOR IMAGES
-    #seg_image_states_flat = seg_images_state.view(pentapede_indices.shape[0], -1)
+    #PAUL uncomment this line and the one in torch.cat to use image
+    #seg_image_states_flat = seg_image_states.view(pentapede_indices.shape[0], -1)
 
     obs = torch.cat((camera_pos,
                      camera_dir,
@@ -457,7 +458,7 @@ def compute_pentapede_observations(root_states,
                      dof_pos_scaled,
                      dof_vel_scaled,
                      actions,
-                     #seg_images_states_flat
+                     #seg_image_states_flat
                      ), dim=-1)
 
     return obs

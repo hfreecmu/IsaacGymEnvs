@@ -3,9 +3,12 @@ name: Pentapede
 
 physics_engine: ${..physics_engine}
 
+# set to True if you use camera sensors in the environment
+enableCameraSensors: True
+
 env:
-  numEnvs: ${resolve_default:1024,${...num_envs}}
-  #numEnvs: ${resolve_default:256,${...num_envs}}
+  #numEnvs: ${resolve_default:1024,${...num_envs}}
+  numEnvs: ${resolve_default:512,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
   #maxEpisodeLength: 2000
@@ -14,8 +17,6 @@ env:
   clipActions: 1.0
   clipDistImage: 3.0
 
-  # set to True if you use camera sensors in the environment
-  enableCameraSensors: True
   camera_link: "wx250s/gripper_link"
   sphere_seg_id: 1
 
@@ -93,8 +94,8 @@ env:
 
   # camera
   camera:
-    image_width: 64
-    image_height: 64
+    image_width: 32
+    image_height: 32
 
 sim:
   dt: 0.02

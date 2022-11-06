@@ -330,13 +330,13 @@ class VecTask(Env):
 
         # step physics and render each frame
         for i in range(self.control_freq_inv):
-            if self.force_render:
-                self.render()
             self.gym.simulate(self.sim)
 
-        # to fix!
-        if self.device == 'cpu':
-            self.gym.fetch_results(self.sim, True)
+        self.gym.fetch_results(self.sim, True)
+        self.gym.step_graphics(self.sim)
+
+        if self.force_render:
+            self.render()
 
         # compute observations, rewards, resets, ...
         self.post_physics_step()
@@ -419,13 +419,8 @@ class VecTask(Env):
                 elif evt.action == "toggle_viewer_sync" and evt.value > 0:
                     self.enable_viewer_sync = not self.enable_viewer_sync
 
-            # fetch results
-            if self.device != 'cpu':
-                self.gym.fetch_results(self.sim, True)
-
             # step graphics
             if self.enable_viewer_sync:
-                self.gym.step_graphics(self.sim)
                 self.gym.draw_viewer(self.viewer, self.sim, True)
 
                 # Wait for dt to elapse in real time.
