@@ -19,12 +19,11 @@ from PIL import Image as im
 #possibly separate between arm and legs
 
 NO_GPU = False
-CAMERA_ENABLED = True
+CAMERA_ENABLED = True  # also change this setting in compute_pentapede_observations function
 
 class Pentapede(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
-
         self.cfg = cfg
 
         self.camera_link = self.cfg["env"]["camera_link"]
@@ -143,7 +142,7 @@ class Pentapede(VecTask):
         self.sphere_indices = to_torch(self.sphere_indices, dtype=torch.long, device=self.device)
 
         if NO_GPU:
-            self.camera_base_dir = torch.zeros(self.num_envs, 3)#.cuda()
+            self.camera_base_dir = torch.zeros(self.num_envs, 3)
         else:
             self.camera_base_dir = torch.zeros(self.num_envs, 3).cuda()
         self.camera_base_dir[:, 0] = 1
@@ -210,7 +209,7 @@ class Pentapede(VecTask):
         sphere_start_pose = gymapi.Transform()
         sphere_start_pose.p = gymapi.Vec3(*self.sphere_init_state[:3])
 
-        #TODO add fov
+        #TODO tune fov
         camera_props = gymapi.CameraProperties()
         camera_props.width = self.cfg["env"]["camera"]["image_width"]
         camera_props.height = self.cfg["env"]["camera"]["image_height"]
@@ -218,6 +217,7 @@ class Pentapede(VecTask):
             camera_props.enable_tensors = False
         else:
             camera_props.enable_tensors = True
+        camera_props.horizontal_fov = 80
 
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -323,7 +323,6 @@ class Pentapede(VecTask):
 
         self.camera_link_states = self.rigid_body_states[:, self.camera_link_index][:, 0:13]
 
-        # PAUL UNCOMMENT THESE 4 LINES BELOW FOR IMAGES
         if CAMERA_ENABLED:
             self.gym.render_all_camera_sensors(self.sim)
             self.gym.start_access_image_tensors(self.sim)
@@ -331,10 +330,9 @@ class Pentapede(VecTask):
             self.gym.end_access_image_tensors(self.sim)
         else:
             self.seg_image_states = None
-        ###
 
-        #debug_im = self.seg_image_states[0].detach().cpu().numpy()
-        #im.fromarray(255*debug_im.astype(np.uint8), mode="L").save("graphics_images/seg_env%d.jpg" % (0))
+        # debug_im = self.seg_image_states[0].detach().cpu().numpy()
+        # im.fromarray(255*debug_im.astype(np.uint8), mode="L").save("graphics_images/seg_env%d.jpg" % (0))
         
 
         # seg_depth_images = []
