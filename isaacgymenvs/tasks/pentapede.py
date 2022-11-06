@@ -17,6 +17,10 @@ from PIL import Image as im
 #TODO arm isn't going all the way up because of clipActions set to 1
 #need to retune clipActions, clipObservations, actionScale, and dofPositionScale
 #possibly separate between arm and legs
+
+NO_GPU = False
+CAMERA_ENABLED = True
+
 class Pentapede(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
@@ -60,11 +64,18 @@ class Pentapede(VecTask):
         sphere_v_ang = self.cfg["env"]["sphereInitState"]["vAngular"]
         sphere_state = sphere_pos + sphere_rot + sphere_v_lin + sphere_v_ang
         self.sphere_init_state = sphere_state
+        self.sphere_pos_lower = self.cfg["env"]["sphereInitState"]["pos_lower"]
+        self.sphere_pos_upper = self.cfg["env"]["sphereInitState"]["pos_upper"]
 
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
-        self.cfg["env"]["numObservations"] = 69#4165
+        width = self.cfg["env"]["camera"]["image_width"]
+        height = self.cfg["env"]["camera"]["image_height"]
+        if CAMERA_ENABLED and not NO_GPU:
+            self.cfg["env"]["numObservations"] = 69 + 3 + width*height
+        else:
+            self.cfg["env"]["numObservations"] = 69 + 3
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -123,14 +134,18 @@ class Pentapede(VecTask):
         # initialize some data used later on
         self.initial_root_states = self.root_states.clone()
         self.initial_root_states[self.pentapede_indices] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
-        self.initial_root_states[self.sphere_indices] = to_torch(self.sphere_init_state, device=self.device, requires_grad=False)
+        # Following line is commented to avoid overriding custom sphere positions
+        # self.initial_root_states[self.sphere_indices] = to_torch(self.sphere_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
 
         self.pentapede_indices = to_torch(self.pentapede_indices, dtype=torch.long, device=self.device)
         self.sphere_indices = to_torch(self.sphere_indices, dtype=torch.long, device=self.device)
 
-        self.camera_base_dir = torch.zeros(self.num_envs, 3).cuda()
+        if NO_GPU:
+            self.camera_base_dir = torch.zeros(self.num_envs, 3)#.cuda()
+        else:
+            self.camera_base_dir = torch.zeros(self.num_envs, 3).cuda()
         self.camera_base_dir[:, 0] = 1
 
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
@@ -199,7 +214,10 @@ class Pentapede(VecTask):
         camera_props = gymapi.CameraProperties()
         camera_props.width = self.cfg["env"]["camera"]["image_width"]
         camera_props.height = self.cfg["env"]["camera"]["image_height"]
-        camera_props.enable_tensors = True
+        if NO_GPU:
+            camera_props.enable_tensors = False
+        else:
+            camera_props.enable_tensors = True
 
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -224,6 +242,12 @@ class Pentapede(VecTask):
             object_idx = self.gym.get_actor_index(env_ptr, pentapede_handle, gymapi.DOMAIN_SIM)
             self.pentapede_indices.append(object_idx)
 
+            # Randomize sphere location in rectangular region
+            upper = np.array(self.sphere_pos_upper[0:3])
+            lower = np.array(self.sphere_pos_lower[0:3])
+            sphere_pos = gymapi.Vec3(*(np.random.rand(3) * (upper-lower) + lower))
+            sphere_start_pose.p = sphere_pos
+
             sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 1, self.sphere_seg_id)
             self.sphere_handles.append(sphere_handle)
             sphere_idx = self.gym.get_actor_index(env_ptr, sphere_handle, gymapi.DOMAIN_SIM)
@@ -235,7 +259,10 @@ class Pentapede(VecTask):
             self.gym.attach_camera_to_body(camera_handle, env_ptr, body_handle, gymapi.Transform(), gymapi.FOLLOW_TRANSFORM)
             self.camera_handles.append(camera_handle)
 
-            seg_image = gymtorch.wrap_tensor(self.gym.get_camera_image_gpu_tensor(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION))
+            if NO_GPU:
+                seg_image = torch.from_numpy(np.array(self.gym.get_camera_image(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION), dtype=np.float32))
+            else:
+                seg_image = gymtorch.wrap_tensor(self.gym.get_camera_image_gpu_tensor(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION))
             self.seg_images.append(seg_image)
 
         for i in range(len(knee_names)):
@@ -297,10 +324,13 @@ class Pentapede(VecTask):
         self.camera_link_states = self.rigid_body_states[:, self.camera_link_index][:, 0:13]
 
         # PAUL UNCOMMENT THESE 4 LINES BELOW FOR IMAGES
-        # self.gym.render_all_camera_sensors(self.sim)
-        # self.gym.start_access_image_tensors(self.sim)
-        # self.seg_image_states = torch.stack(self.seg_images).float()
-        # self.gym.end_access_image_tensors(self.sim)
+        if CAMERA_ENABLED:
+            self.gym.render_all_camera_sensors(self.sim)
+            self.gym.start_access_image_tensors(self.sim)
+            self.seg_image_states = torch.stack(self.seg_images).float()
+            self.gym.end_access_image_tensors(self.sim)
+        else:
+            self.seg_image_states = None
         ###
 
         #debug_im = self.seg_image_states[0].detach().cpu().numpy()
@@ -339,7 +369,8 @@ class Pentapede(VecTask):
                                                         self.ang_vel_scale,
                                                         self.dof_pos_scale,
                                                         self.arm_indices,
-                                                        self.dof_vel_scale
+                                                        self.dof_vel_scale,
+                                                        self.sphere_indices
         )
 
     def reset_idx(self, env_ids):
@@ -393,17 +424,22 @@ def compute_pentapede_reward(
     sphere_dir = normalize(sphere_pos - camera_pos)
     
     # camera position reward
-    camera_pos_error = torch.sum(torch.square(sphere_pos - camera_pos), dim=1)
-    rew_cam_pos = torch.exp(-camera_pos_error/0.25) * rew_scales["camera_pos"]
+    camera_pos_error = torch.sum(torch.square(sphere_pos[:,:2] - camera_pos[:,:2]), dim=1) / torch.sum(torch.square(sphere_pos), dim=1)
+    # rew_cam_pos = torch.exp(-camera_pos_error/0.25) * rew_scales["camera_pos"]
+    rew_cam_pos = -camera_pos_error * rew_scales["camera_pos"]
 
+    # camera direction reward
     camera_quat_error = torch.sum(torch.square(sphere_dir - camera_dir), dim=1)
-    rew_cam_quat = torch.exp(-camera_quat_error/0.25) * rew_scales["camera_quat"]
+    # rew_cam_quat = torch.exp(-camera_quat_error/0.25) * rew_scales["camera_quat"]
+    rew_cam_quat = -camera_quat_error * rew_scales["camera_quat"]
 
     # torque penalty
     rew_torque = torch.sum(torch.square(torques), dim=1) * rew_scales["torque"]
 
-    total_reward = rew_cam_pos + rew_cam_quat # + rew_torque
-    total_reward = torch.clip(total_reward, 0., None)
+    total_reward = rew_cam_pos + rew_cam_quat #+ rew_torque
+    # total_reward = torch.clip(total_reward, 0., None)
+    # print("ERROR", camera_pos_error[-1], camera_quat_error[-1])
+    # print("REWARD",total_reward[-1], rew_cam_pos[-1], rew_cam_quat[-1], rew_torque[-1])
 
     reset = torch.norm(contact_forces[:, base_index, :], dim=1) > 1.
     reset = reset | torch.any(torch.norm(contact_forces[:, knee_indices, :], dim=2) > 1., dim=1)
@@ -429,7 +465,8 @@ def compute_pentapede_observations(root_states,
                                 ang_vel_scale,
                                 dof_pos_scale,
                                 arm_indices,
-                                dof_vel_scale
+                                dof_vel_scale,
+                                sphere_indices,
                                 ):
     
     base_quat = root_states[pentapede_indices, 3:7]
@@ -442,22 +479,40 @@ def compute_pentapede_observations(root_states,
 
     camera_dir = quat_rotate(camera_quat, camera_base_dir)
 
+    sphere_pos = root_states[sphere_indices, 0:3]
+    sphere_dir = normalize(sphere_pos - camera_pos)
+
+    beta = 0 # small beta = greater handicap
+    goal_dir = beta*camera_dir + (1-beta)*sphere_dir
+
     dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
     dof_vel_scaled = dof_vel * dof_vel_scale
 
-    # PAUL UNCOMMENT THIS LINE AND THE ONE IN THE OBS FOR IMAGES
-    #seg_image_states_flat = seg_images_state.view(pentapede_indices.shape[0], -1)
-
-    obs = torch.cat((camera_pos,
-                     camera_dir,
-                     base_lin_vel,
-                     base_ang_vel,
-                     projected_gravity,
-                     dof_pos_scaled,
-                     dof_vel_scaled,
-                     actions,
-                     #seg_images_states_flat
-                     ), dim=-1)
+    CAMERA_ENABLED = True
+    if CAMERA_ENABLED:
+        seg_image_states_flat = seg_image_states.view(pentapede_indices.shape[0], -1)
+        obs = torch.cat((camera_pos,
+                         camera_dir,
+                         base_lin_vel,
+                         base_ang_vel,
+                         projected_gravity,
+                         dof_pos_scaled,
+                         dof_vel_scaled,
+                         actions,
+                         seg_image_states_flat,
+                         goal_dir,
+                         ), dim=-1)
+    else:
+        obs = torch.cat((camera_pos,
+                         camera_dir,
+                         base_lin_vel,
+                         base_ang_vel,
+                         projected_gravity,
+                         dof_pos_scaled,
+                         dof_vel_scaled,
+                         actions,
+                         goal_dir,
+                         ), dim=-1)
 
     return obs

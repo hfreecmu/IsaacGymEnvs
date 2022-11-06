@@ -33,6 +33,8 @@ env:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
     pos: [2, 0, 2] # x,y,z [m]
+    pos_lower: [-2, -2, 2] # x,y,z [m]
+    pos_upper: [2, 2, 2] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
@@ -73,7 +75,7 @@ env:
   learn:
     # rewards
     cameraPosRewardScale: 2.0
-    cameraQuatRewardScale: 0.001
+    cameraQuatRewardScale: 2.0
     torqueRewardScale: -0.000025
 
     # normalization
@@ -93,8 +95,8 @@ env:
 
   # camera
   camera:
-    image_width: 64
-    image_height: 64
+    image_width: 16
+    image_height: 16
 
 sim:
   dt: 0.02
