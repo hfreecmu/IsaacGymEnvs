@@ -74,9 +74,9 @@ env:
 
   learn:
     # rewards
-    cameraPosRewardScale: 2.0
-    #cameraQuatRewardScale: 2.0
-    cameraQuatRewardScale: 0.001
+    cameraPosRewardScale: 0.5
+    cameraQuatRewardScale: 1.0
+    #cameraQuatRewardScale: 0.001
     #cameraQuatRewardScale: 0.0
     torqueRewardScale: -0.000025
 
@@ -99,6 +99,7 @@ env:
   camera:
     image_width: 16
     image_height: 16
+    horizontal_fov: 80
 
 sim:
   dt: 0.02
