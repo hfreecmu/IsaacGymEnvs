@@ -7,11 +7,10 @@ physics_engine: ${..physics_engine}
 enableCameraSensors: True
 
 env:
-  #numEnvs: ${resolve_default:1024,${...num_envs}}
-  numEnvs: ${resolve_default:512,${...num_envs}}
+  numEnvs: ${resolve_default:1024,${...num_envs}}
+  #numEnvs: ${resolve_default:512,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
-  #maxEpisodeLength: 2000
 
   clipObservations: 5.0
   clipActions: 1.0
@@ -33,7 +32,7 @@ env:
   sphereInitState:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
-    pos: [2, 0, 2] # x,y,z [m]
+    pos_fixed: [2, 0, 2] # x,y,z [m]
     pos_lower: [-2, -2, 2] # x,y,z [m]
     pos_upper: [2, 2, 2] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
@@ -76,7 +75,9 @@ env:
   learn:
     # rewards
     cameraPosRewardScale: 2.0
-    cameraQuatRewardScale: 2.0
+    #cameraQuatRewardScale: 2.0
+    cameraQuatRewardScale: 0.001
+    #cameraQuatRewardScale: 0.0
     torqueRewardScale: -0.000025
 
     # normalization

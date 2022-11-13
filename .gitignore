@@ -30,3 +30,7 @@ runs/
 outputs/
 *.hydra*
 /isaacgymenvs/wandb
+
+dep
+*.vscode*
+graphics_images
