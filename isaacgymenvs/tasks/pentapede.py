@@ -26,7 +26,7 @@ NO_GPU = False
 #Change cmaera enabled here and in computer obserations
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
-NUM_LINES = 0
+NUM_LINES = 4
 DEBUG_IM = False
 
 class Pentapede(VecTask):
@@ -460,12 +460,14 @@ def compute_pentapede_reward(
     sphere_dir_cam = quat_rotate_inverse(camera_quat, normalize(sphere_pos_world - camera_pos_world))
     
     # camera position reward
-    camera_pos_error = torch.sum(torch.square(sphere_pos_world - camera_pos_world), dim=1)
-    rew_cam_pos = torch.exp(-camera_pos_error/0.25) * rew_scales["camera_pos"]
+    camera_pos_error = torch.sum(torch.square(sphere_pos_world - camera_pos_world), dim=1) / torch.sum(torch.square(sphere_pos_world), dim=1)
+    rew_cam_pos = torch.exp(-camera_pos_error/0.15) * rew_scales["camera_pos"]
+    #rew_cam_pos = 0.01 + (-camera_pos_error) * rew_scales["camera_pos"]
 
     # camera direction reward
     camera_quat_error = torch.sum(torch.square(sphere_dir_cam - camera_base_dir), dim=1)
-    rew_cam_quat = torch.exp(-camera_quat_error/0.25) * rew_scales["camera_quat"]
+    rew_cam_quat = torch.exp(-camera_quat_error/0.5) * rew_scales["camera_quat"]
+    #rew_cam_quat = 0.01 + (-camera_quat_error) * rew_scales["camera_quat"]
 
     # torque penalty
     #rew_torque = torch.sum(torch.square(torques), dim=1) * rew_scales["torque"]

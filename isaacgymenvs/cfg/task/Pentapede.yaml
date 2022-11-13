@@ -74,7 +74,7 @@ env:
 
   learn:
     # rewards
-    cameraPosRewardScale: 0.5
+    cameraPosRewardScale: 2.0
     cameraQuatRewardScale: 1.0
     #cameraQuatRewardScale: 0.001
     #cameraQuatRewardScale: 0.0
