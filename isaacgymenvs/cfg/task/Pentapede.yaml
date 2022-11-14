@@ -7,7 +7,7 @@ physics_engine: ${..physics_engine}
 enableCameraSensors: True
 
 env:
-  numEnvs: ${resolve_default:1024,${...num_envs}}
+  numEnvs: ${resolve_default:2048,${...num_envs}}
   #numEnvs: ${resolve_default:512,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
@@ -17,6 +17,7 @@ env:
   clipDistImage: 3.0
 
   camera_link: "wx250s/gripper_link"
+  position_link: "base"
   sphere_seg_id: 1
 
   plane:
@@ -74,7 +75,7 @@ env:
 
   learn:
     # rewards
-    cameraPosRewardScale: 2.0
+    cameraPosRewardScale: 5.0
     cameraQuatRewardScale: 1.0
     #cameraQuatRewardScale: 0.001
     #cameraQuatRewardScale: 0.0

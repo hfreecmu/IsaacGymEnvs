@@ -35,6 +35,7 @@ class Pentapede(VecTask):
         self.cfg = cfg
 
         self.camera_link = self.cfg["env"]["camera_link"]
+        self.position_link = self.cfg["env"]["position_link"]
         self.sphere_seg_id = self.cfg["env"]["sphere_seg_id"]
         self.clip_dist_image = self.cfg["env"]["clipDistImage"]
         
@@ -85,9 +86,9 @@ class Pentapede(VecTask):
         width = self.cfg["env"]["camera"]["image_width"]
         height = self.cfg["env"]["camera"]["image_height"]
         if CAMERA_ENABLED and not NO_GPU:
-            self.cfg["env"]["numObservations"] = 67 + width*height
+            self.cfg["env"]["numObservations"] = 68 + width*height
         else:
-            self.cfg["env"]["numObservations"] = 67
+            self.cfg["env"]["numObservations"] = 68
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -247,11 +248,12 @@ class Pentapede(VecTask):
         self.envs = []
         self.pentapede_handles = []
         self.sphere_handles = []
-        self.camera_handles = []
         self.pentapede_indices = []
         self.sphere_indices = []
 
-        self.seg_images = []
+        if CAMERA_ENABLED:
+            self.camera_handles = []
+            self.seg_images = []
 
         for i in range(self.num_envs):
             # create env instance
@@ -271,17 +273,18 @@ class Pentapede(VecTask):
             self.sphere_indices.append(sphere_idx)
             self.gym.set_rigid_body_color(env_ptr, sphere_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*sphere_color))
 
-            camera_handle = self.gym.create_camera_sensor(env_ptr, camera_props)
-            body_handle = self.gym.find_actor_rigid_body_handle(env_ptr, pentapede_handle, self.camera_link)
-            self.gym.attach_camera_to_body(camera_handle, env_ptr, body_handle, gymapi.Transform(), gymapi.FOLLOW_TRANSFORM)
-            self.camera_handles.append(camera_handle)
+            if CAMERA_ENABLED:
+                camera_handle = self.gym.create_camera_sensor(env_ptr, camera_props)
+                body_handle = self.gym.find_actor_rigid_body_handle(env_ptr, pentapede_handle, self.camera_link)
+                self.gym.attach_camera_to_body(camera_handle, env_ptr, body_handle, gymapi.Transform(), gymapi.FOLLOW_TRANSFORM)
+                self.camera_handles.append(camera_handle)
 
-            if NO_GPU:
-                ### WARNING WARNING WARNING won't be able to read camera in non gpu mode using this
-                seg_image = torch.from_numpy(np.array(self.gym.get_camera_image(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION), dtype=np.float32))
-            else:
-                seg_image = gymtorch.wrap_tensor(self.gym.get_camera_image_gpu_tensor(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION))
-            self.seg_images.append(seg_image)
+                if NO_GPU:
+                    ### WARNING WARNING WARNING won't be able to read camera in non gpu mode using this
+                    seg_image = torch.from_numpy(np.array(self.gym.get_camera_image(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION), dtype=np.float32))
+                else:
+                    seg_image = gymtorch.wrap_tensor(self.gym.get_camera_image_gpu_tensor(self.sim, env_ptr, camera_handle, gymapi.IMAGE_SEGMENTATION))
+                self.seg_images.append(seg_image)
 
         ###WARNING WARNING WARNING 
         #We use find_asset_{TYPE}_index, but anymal uses find_actor_{TYPE}_body_handle
@@ -296,9 +299,12 @@ class Pentapede(VecTask):
             self.arm_indices[i] = self.gym.find_asset_dof_index(pentapede_asset, arm_names[i])
 
         self.camera_link_index = self.gym.find_asset_rigid_body_index(pentapede_asset, self.camera_link)
+        self.position_link_index = self.gym.find_asset_rigid_body_index(pentapede_asset, self.position_link)
+        
         self.base_index = self.gym.find_asset_rigid_body_index(pentapede_asset, "base")
 
-        self.seg_images_stack = torch.stack(self.seg_images)
+        if CAMERA_ENABLED:
+            self.seg_images_stack = torch.stack(self.seg_images)
 
     def pre_physics_step(self, actions):
         self.actions = actions.clone().to(self.device)
@@ -324,6 +330,7 @@ class Pentapede(VecTask):
         self.rew_buf[:], self.reset_buf[:] = compute_pentapede_reward(
             self.root_states,
             self.camera_link_states,
+            self.position_link_states,
             self.torques,
             self.contact_forces,
             self.sphere_indices,
@@ -342,6 +349,7 @@ class Pentapede(VecTask):
         self.gym.refresh_dof_force_tensor(self.sim)
 
         self.camera_link_states = self.rigid_body_states[:, self.camera_link_index][:, 0:13]
+        self.position_link_states = self.rigid_body_states[:, self.position_link_index][:, 0:13]
 
         if CAMERA_ENABLED:
             self.gym.render_all_camera_sensors(self.sim)
@@ -381,6 +389,7 @@ class Pentapede(VecTask):
                                                         self.root_states,
                                                         self.pentapede_indices,
                                                         self.camera_link_states,
+                                                        self.position_link_states,
                                                         self.seg_image_states,
                                                         self.dof_pos,
                                                         self.default_dof_pos,
@@ -437,6 +446,7 @@ def compute_pentapede_reward(
     # tensors
     root_states,
     camera_link_states,
+    position_link_states,
     torques,
     contact_forces,
     sphere_indices,
@@ -450,18 +460,19 @@ def compute_pentapede_reward(
     max_episode_length
 ):
     # (reward, reset, feet_in air, feet_air_time, episode sums)
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Dict[str, float], int, Tensor, int) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Dict[str, float], int, Tensor, int) -> Tuple[Tensor, Tensor]
 
     sphere_pos_world = root_states[sphere_indices, 0:3]
     camera_pos_world = camera_link_states[:, 0:3]
     camera_quat = camera_link_states[:, 3:7]
+    pos_world = position_link_states[:, 0:3]
 
     #TODO still don't think this is correct
     sphere_dir_cam = quat_rotate_inverse(camera_quat, normalize(sphere_pos_world - camera_pos_world))
     
     # camera position reward
-    camera_pos_error = torch.sum(torch.square(sphere_pos_world - camera_pos_world), dim=1) / torch.sum(torch.square(sphere_pos_world), dim=1)
-    rew_cam_pos = torch.exp(-camera_pos_error/0.15) * rew_scales["camera_pos"]
+    camera_pos_error = torch.sum(torch.square(sphere_pos_world[:, 0:2] - pos_world[:, 0:2]), dim=1) / torch.sum(torch.square(sphere_pos_world[:, 0:2]), dim=1)
+    rew_cam_pos = torch.exp(-camera_pos_error/0.1) * rew_scales["camera_pos"]
     #rew_cam_pos = 0.01 + (-camera_pos_error) * rew_scales["camera_pos"]
 
     # camera direction reward
@@ -487,6 +498,7 @@ def compute_pentapede_reward(
 def compute_pentapede_observations(root_states,
                                 pentapede_indices,
                                 camera_link_states,
+                                position_link_states,
                                 seg_image_states,
                                 dof_pos,
                                 default_dof_pos,
@@ -510,17 +522,18 @@ def compute_pentapede_observations(root_states,
     
     camera_pos = camera_link_states[:, 0:3]
     camera_quat = camera_link_states[:, 3:7]
+    pos_world = position_link_states[:, 0:3]
 
-    #camera dir and sphere dir in robot frame
     camera_dir_world = quat_rotate(camera_quat, camera_base_dir)
 
-    sphere_pos = root_states[sphere_indices, 0:3]
-    sphere_dir = normalize(sphere_pos - camera_pos)
+    sphere_pos_world = root_states[sphere_indices, 0:3]
+    sphere_dir = normalize(sphere_pos_world - camera_pos)
 
     #TODO ones and zeros or ones and minus ones?
     in_front_cam = is_in_camera_view(sphere_dir, camera_dir_world, dot_product_thresh)
 
     sphere_dir_cam = quat_rotate_inverse(camera_quat, sphere_dir)
+    pos_dist = torch.sqrt(torch.sum(torch.square(sphere_pos_world[:, 0:2] - pos_world[:, 0:2]), dim=1).unsqueeze(-1))
 
     dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
@@ -536,6 +549,7 @@ def compute_pentapede_observations(root_states,
                          actions,
                          seg_image_states_flat,
                          in_front_cam*sphere_dir_cam,
+                         in_front_cam*pos_dist,
                          in_front_cam,
                          ), dim=-1)
     else:
@@ -546,6 +560,7 @@ def compute_pentapede_observations(root_states,
                          dof_vel_scaled,
                          actions,
                          in_front_cam*sphere_dir_cam,
+                         in_front_cam*pos_dist,
                          in_front_cam,
                          ), dim=-1)
 
