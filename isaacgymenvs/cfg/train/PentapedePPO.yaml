@@ -60,7 +60,7 @@ params:
     grad_norm: 1.
     horizon_length: 24
     minibatch_size: 16384
-    #minibatch_size: 2048
+    #minibatch_size: 512
     #minibatch_size: 32
     mini_epochs: 5
     critic_coef: 2

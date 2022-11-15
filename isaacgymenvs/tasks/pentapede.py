@@ -26,7 +26,9 @@ NO_GPU = False
 #Change cmaera enabled here and in computer obserations
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
+MOVE_SPHERE = True
 NUM_LINES = 4
+FREEZE_PENTAPEDE = False
 DEBUG_IM = False
 
 class Pentapede(VecTask):
@@ -103,6 +105,9 @@ class Pentapede(VecTask):
 
         for key in self.rew_scales.keys():
             self.rew_scales[key] *= self.dt
+
+        if MOVE_SPHERE:
+            self.sphere_speed = self.cfg["env"]["sphereInitState"]["speed"]# * self.dt
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -221,7 +226,8 @@ class Pentapede(VecTask):
         sphere_color = self.cfg["env"]["sphereInitState"]["color"]
         sphere_asset_options = gymapi.AssetOptions()
         sphere_asset_options.slices_per_cylinder = 40
-        sphere_asset_options.fix_base_link = True
+        sphere_asset_options.fix_base_link = False
+        sphere_asset_options.disable_gravity = True
         sphere_asset = self.gym.create_sphere(self.sim, sphere_radius, sphere_asset_options)
         sphere_start_pose = gymapi.Transform()
         if not USE_RANDOM_SPHERE:
@@ -307,24 +313,28 @@ class Pentapede(VecTask):
             self.seg_images_stack = torch.stack(self.seg_images)
 
     def pre_physics_step(self, actions):
+
         self.actions = actions.clone().to(self.device)
         
         #WARNING WARNING WARNING looks like set joint value directly, not delta
         #TODO make it so don't need both operations on arm indices
         targets = self.action_scale_leg * self.actions + self.default_dof_pos
         targets[:, self.arm_indices] = self.action_scale_arm * self.actions[:, self.arm_indices] + self.default_dof_pos[:, self.arm_indices]
-        #targets = self.default_dof_pos
+
+        if FREEZE_PENTAPEDE:
+            targets = self.default_dof_pos
+
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
     def post_physics_step(self):
         self.progress_buf += 1
 
+        self.compute_observations()
+        self.compute_reward(self.actions)
+
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
-
-        self.compute_observations()
-        self.compute_reward(self.actions)
 
     def compute_reward(self, actions):
         self.rew_buf[:], self.reset_buf[:] = compute_pentapede_reward(
@@ -384,7 +394,6 @@ class Pentapede(VecTask):
             line_vertices_2 = np.concatenate((camera_pos_debug, sphere_pos_world), axis=1).flatten().tolist()
             self.gym.add_lines(self.viewer, self.envs[i], 1, line_vertices_2, line_colors_2)
 
-
         self.obs_buf[:] = compute_pentapede_observations(  # tensors
                                                         self.root_states,
                                                         self.pentapede_indices,
@@ -408,6 +417,9 @@ class Pentapede(VecTask):
         )
 
     def reset_idx(self, env_ids):
+        if len(env_ids) == 0:
+            return
+
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids]
         self.dof_vel[env_ids] = 0
         
@@ -416,13 +428,21 @@ class Pentapede(VecTask):
                                                      gymtorch.unwrap_tensor(self.initial_root_states),
                                                      gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
 
-
         #TODO combine these two set actor calls into one if it affects speed         
         sphere_indices = self.sphere_indices[env_ids].to(dtype=torch.int32)                                   
         if USE_RANDOM_SPHERE: 
             sphere_pos = torch.as_tensor(np.random.rand(len(env_ids), 3) * (self.sphere_pos_upper-self.sphere_pos_lower) + self.sphere_pos_lower, 
                                          dtype=torch.float, device=self.device)
             self.initial_root_states[sphere_indices.long(), 0:3] = sphere_pos
+
+
+        if MOVE_SPHERE:
+            random_vel = np.random.rand(len(env_ids), 3)*2 - 1
+            random_vel[:, 2] = 0
+            random_vel = (self.sphere_speed * random_vel / np.expand_dims(np.linalg.norm(random_vel, axis=1), axis=1)).tolist()
+            random_vel = to_torch(random_vel, device=self.device, requires_grad=False)
+
+            self.initial_root_states[sphere_indices.long(), 7:10] = random_vel
 
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.initial_root_states),

@@ -389,6 +389,7 @@ class VecTask(Env):
         return self.obs_dict
 
     def reset_done(self):
+        raise RuntimeError('Why in here Pentapede?')
         """Reset the environment.
         Returns:
             Observation dictionary, indices of environments being reset

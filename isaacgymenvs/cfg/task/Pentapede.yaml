@@ -8,7 +8,7 @@ enableCameraSensors: True
 
 env:
   numEnvs: ${resolve_default:2048,${...num_envs}}
-  #numEnvs: ${resolve_default:512,${...num_envs}}
+  #numEnvs: ${resolve_default:128,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
 
@@ -17,6 +17,8 @@ env:
   clipDistImage: 3.0
 
   camera_link: "wx250s/gripper_link"
+  #If use below need to remove collapse_fix_joins in pentapede.py
+  #camera_link: "depth_camera_front_camera"
   position_link: "base"
   sphere_seg_id: 1
 
@@ -39,6 +41,7 @@ env:
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
+    speed: 0.5 # m/s
 
   control:
     # PD Drive parameters:
