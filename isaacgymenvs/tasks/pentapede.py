@@ -21,7 +21,7 @@ from PIL import Image as im
 #need to retune clipActions, clipObservations, actionScale, and dofPositionScale
 #possibly separate between arm and legs
 
-NO_GPU = False
+NO_GPU = True
 
 #Change cmaera enabled here and in computer obserations
 CAMERA_ENABLED = False
@@ -337,7 +337,7 @@ class Pentapede(VecTask):
             self.reset_idx(env_ids)
 
     def compute_reward(self, actions):
-        self.rew_buf[:], self.reset_buf[:] = compute_pentapede_reward(
+        self.rew_buf1[:], self.rew_buf2[:], self.reset_buf[:] = compute_pentapede_reward(
             self.root_states,
             self.camera_link_states,
             self.position_link_states,
@@ -480,7 +480,7 @@ def compute_pentapede_reward(
     max_episode_length
 ):
     # (reward, reset, feet_in air, feet_air_time, episode sums)
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Dict[str, float], int, Tensor, int) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Dict[str, float], int, Tensor, int) -> Tuple[Tensor, Tensor, Tensor]
 
     sphere_pos_world = root_states[sphere_indices, 0:3]
     camera_pos_world = camera_link_states[:, 0:3]
@@ -511,7 +511,8 @@ def compute_pentapede_reward(
     time_out = episode_lengths >= max_episode_length - 1  # no terminal reward for time-outs
     reset = reset | time_out
 
-    return total_reward.detach(), reset
+    return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
+    # return total_reward.detach(), reset
 
 
 @torch.jit.script
@@ -573,15 +574,15 @@ def compute_pentapede_observations(root_states,
                          in_front_cam,
                          ), dim=-1)
     else:
-        obs = torch.cat((base_lin_vel,
-                         base_ang_vel,
-                         projected_gravity,
-                         dof_pos_scaled,
-                         dof_vel_scaled,
-                         actions,
-                         in_front_cam*sphere_dir_cam,
-                         in_front_cam*pos_dist,
-                         in_front_cam,
+        obs = torch.cat((base_lin_vel,                  # 3
+                         base_ang_vel,                  # 3
+                         projected_gravity,             # 3
+                         dof_pos_scaled,                # 18
+                         dof_vel_scaled,                # 18
+                         actions,                       # 18
+                         in_front_cam*sphere_dir_cam,   # 3
+                         in_front_cam*pos_dist,         # 1
+                         in_front_cam,                  # 1
                          ), dim=-1)
 
     return obs

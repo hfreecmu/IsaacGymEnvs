@@ -377,13 +377,13 @@ def compute_anymal_observations(root_states,
 
     commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
 
-    obs = torch.cat((base_lin_vel,
-                     base_ang_vel,
-                     projected_gravity,
-                     commands_scaled,
-                     dof_pos_scaled,
-                     dof_vel*dof_vel_scale,
-                     actions
+    obs = torch.cat((base_lin_vel,              # 3
+                     base_ang_vel,              # 3
+                     projected_gravity,         # 3
+                     commands_scaled,           # 3
+                     dof_pos_scaled,            # 12
+                     dof_vel*dof_vel_scale,     # 12
+                     actions                    # 12
                      ), dim=-1)
 
     return obs
