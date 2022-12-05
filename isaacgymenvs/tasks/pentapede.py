@@ -159,10 +159,8 @@ class Pentapede(VecTask):
         self.pentapede_indices = to_torch(self.pentapede_indices, dtype=torch.long, device=self.device)
         self.sphere_indices = to_torch(self.sphere_indices, dtype=torch.long, device=self.device)
 
-        if NO_GPU:
-            self.camera_base_dir = torch.zeros(self.num_envs, 3)
-        else:
-            self.camera_base_dir = torch.zeros(self.num_envs, 3).cuda()
+  
+        self.camera_base_dir = torch.zeros(self.num_envs, 3).to(self.device)
 
         #WARNING WARNING WARNING
         #only works if defining initial pose is in this direction
@@ -244,6 +242,8 @@ class Pentapede(VecTask):
         dot_product_thresh = np.cos(np.deg2rad(horizontal_fov) / 2)
         self.dot_product_thresh = torch.as_tensor(dot_product_thresh, dtype=torch.float32, device=self.device)
         
+        #TODO might be  able to access tensor buffer directly even if cpu
+        #maybe not because get_camera_image does not return buffer, but could check
         if NO_GPU:
             camera_props.enable_tensors = False
         else:
@@ -328,6 +328,15 @@ class Pentapede(VecTask):
 
     def post_physics_step(self):
         self.progress_buf += 1
+
+        #leaving this in as this is where it was before
+        #but there was in issue with ball when other envs would reset
+        #moving it after fixed it, not sure why
+        #almost as if set set_actor_root_state_tensor_indexed needs to be called
+        #right before sim and not anytime else
+        # env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        # if len(env_ids) > 0:
+        #     self.reset_idx(env_ids)
 
         self.compute_observations()
         self.compute_reward(self.actions)
@@ -416,6 +425,10 @@ class Pentapede(VecTask):
                                                         CAMERA_ENABLED
         )
 
+    #TODO call set_actor_root_state_tensor_indexed ONLY ONCE with combined indices
+    #could be reason for bug of moving this somewhere else and can possibly put it back
+    #it is not turns out but leaving this comment here
+    #7db807a55a81b7979f46bbf86430088cd57e56de
     def reset_idx(self, env_ids):
         if len(env_ids) == 0:
             return
@@ -424,9 +437,11 @@ class Pentapede(VecTask):
         self.dof_vel[env_ids] = 0
         
         pentapede_indices = self.pentapede_indices[env_ids].to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                     gymtorch.unwrap_tensor(self.initial_root_states),
-                                                     gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
+        #leaving below in as that is what it used to be but documentaiton says call once
+        #even though it worked
+        # self.gym.set_actor_root_state_tensor_indexed(self.sim,
+        #                                              gymtorch.unwrap_tensor(self.initial_root_states),
+        #                                              gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
 
         #TODO combine these two set actor calls into one if it affects speed         
         sphere_indices = self.sphere_indices[env_ids].to(dtype=torch.int32)                                   
@@ -444,9 +459,16 @@ class Pentapede(VecTask):
 
             self.initial_root_states[sphere_indices.long(), 7:10] = random_vel
 
+        #leaving below in as that is what it used to be but documentaiton says call once
+        #even though it worked
+        # self.gym.set_actor_root_state_tensor_indexed(self.sim,
+        #                                              gymtorch.unwrap_tensor(self.initial_root_states),
+        #                                              gymtorch.unwrap_tensor(sphere_indices), len(env_ids))
+
+        full_indices = torch.cat((pentapede_indices, sphere_indices), dim=0)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.initial_root_states),
-                                                     gymtorch.unwrap_tensor(sphere_indices), len(env_ids))
+                                                     gymtorch.unwrap_tensor(full_indices), 2*len(env_ids))
 
 
         self.gym.set_dof_state_tensor_indexed(self.sim,
