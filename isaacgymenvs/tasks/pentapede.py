@@ -26,10 +26,14 @@ NO_GPU = True
 #Change cmaera enabled here and in computer obserations
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
-MOVE_SPHERE = True
+MOVE_SPHERE_STRAIGHT = False
+MOVE_SPHERE_RANDOM = True
 NUM_LINES = 4
-FREEZE_PENTAPEDE = False
+FREEZE_PENTAPEDE = True
 DEBUG_IM = False
+
+assert not (MOVE_SPHERE_RANDOM and MOVE_SPHERE_STRAIGHT)
+MOVE_SPHERE = (MOVE_SPHERE_RANDOM or MOVE_SPHERE_STRAIGHT)
 
 class Pentapede(VecTask):
 
@@ -108,6 +112,10 @@ class Pentapede(VecTask):
 
         if MOVE_SPHERE:
             self.sphere_speed = self.cfg["env"]["sphereInitState"]["speed"]# * self.dt
+
+        if MOVE_SPHERE_RANDOM:
+            self.sphere_target_pos = torch.zeros((self.num_envs, 3)).float().to(self.device)
+            self.sphere_source_pos = torch.zeros((self.num_envs, 3)).float().to(self.device)
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -318,6 +326,7 @@ class Pentapede(VecTask):
         
         #WARNING WARNING WARNING looks like set joint value directly, not delta
         #TODO make it so don't need both operations on arm indices
+        #also might want to make it so previously reset indices are not updated perhaps?
         targets = self.action_scale_leg * self.actions + self.default_dof_pos
         targets[:, self.arm_indices] = self.action_scale_arm * self.actions[:, self.arm_indices] + self.default_dof_pos[:, self.arm_indices]
 
@@ -341,7 +350,41 @@ class Pentapede(VecTask):
         self.compute_observations()
         self.compute_reward(self.actions)
 
+        #documentation set refresh should always be called before set so
+        #I am more confident with this here
+        #although first observation might be wonky? will that have long term effect?
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        if MOVE_SPHERE_RANDOM:
+            #TODO I know technically wrong if random target position is close to current position
+            #but such a small and rare case I do not care that much
+            
+            sphere_vel = self.sphere_target_pos - self.sphere_source_pos
+            des_sphere_vel = self.sphere_target_pos - self.root_states[self.sphere_indices, 0:3]
+
+            dot_prod = torch.sum(sphere_vel*des_sphere_vel, dim=-1)
+            sphere_speed_ids = torch.where(dot_prod <= 0.0, 1.0, 0.0).nonzero(as_tuple=False).squeeze(-1)
+
+            is_not_in_env_id = [False if i in env_ids else True for i in sphere_speed_ids]
+            sphere_speed_ids = sphere_speed_ids[is_not_in_env_id]
+ 
+            #WARNING WARNING WARNING
+            #TODO
+            #should not call set_actor_root_state_tensor_indexed more than once, but just for debugging now. it seems to work
+            #even though documentation says it shouldn't. So be careful
+            sphere_speed_indices = self.sphere_indices[sphere_speed_ids].to(dtype=torch.int32) 
+            self.sphere_target_pos[sphere_speed_ids] = torch.as_tensor(np.random.rand(len(sphere_speed_ids), 3) * (self.sphere_pos_upper-self.sphere_pos_lower) + \
+                                                        self.sphere_pos_lower, dtype=torch.float, device=self.device)
+            self.sphere_source_pos[sphere_speed_ids] = self.root_states[sphere_speed_indices.long(), 0:3]
+
+            sphere_vel = torch.nn.functional.normalize(self.sphere_target_pos[sphere_speed_ids] - self.sphere_source_pos[sphere_speed_ids])
+            clone_initial_root_states = torch.clone(self.root_states)
+            clone_initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
+            clone_initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
+
+            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                         gymtorch.unwrap_tensor(clone_initial_root_states),
+                                                         gymtorch.unwrap_tensor(sphere_speed_indices), len(sphere_speed_indices))
+
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
 
@@ -403,6 +446,13 @@ class Pentapede(VecTask):
             line_vertices_2 = np.concatenate((camera_pos_debug, sphere_pos_world), axis=1).flatten().tolist()
             self.gym.add_lines(self.viewer, self.envs[i], 1, line_vertices_2, line_colors_2)
 
+            if MOVE_SPHERE_RANDOM:
+                line_colors_3 = [1.0, 0.0, 0.0]
+                sphere_pos_origin = self.sphere_source_pos[i:i+1, 0:3].detach().cpu().numpy()
+                sphere_pos_target = self.sphere_target_pos[i:i+1, 0:3].detach().cpu().numpy()
+                line_vertices_3 = np.concatenate((sphere_pos_origin, sphere_pos_target), axis=1).flatten().tolist()
+                self.gym.add_lines(self.viewer, self.envs[i], 1, line_vertices_3, line_colors_3)
+
         self.obs_buf[:] = compute_pentapede_observations(  # tensors
                                                         self.root_states,
                                                         self.pentapede_indices,
@@ -430,7 +480,7 @@ class Pentapede(VecTask):
     #it is not turns out but leaving this comment here
     #7db807a55a81b7979f46bbf86430088cd57e56de
     def reset_idx(self, env_ids):
-        if len(env_ids) == 0:
+        if len(env_ids) <= 0:
             return
 
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids]
@@ -451,14 +501,24 @@ class Pentapede(VecTask):
             self.initial_root_states[sphere_indices.long(), 0:3] = sphere_pos
 
 
-        if MOVE_SPHERE:
+        if MOVE_SPHERE_STRAIGHT:
             random_vel = np.random.rand(len(env_ids), 3)*2 - 1
             random_vel[:, 2] = 0
             random_vel = (self.sphere_speed * random_vel / np.expand_dims(np.linalg.norm(random_vel, axis=1), axis=1)).tolist()
             random_vel = to_torch(random_vel, device=self.device, requires_grad=False)
 
             self.initial_root_states[sphere_indices.long(), 7:10] = random_vel
+        elif MOVE_SPHERE_RANDOM:
+            self.sphere_target_pos[env_ids] = torch.as_tensor(np.random.rand(len(env_ids), 3) * (self.sphere_pos_upper-self.sphere_pos_lower) + \
+                                              self.sphere_pos_lower, dtype=torch.float, device=self.device)
+            
+            self.sphere_source_pos[env_ids] = self.initial_root_states[sphere_indices.long(), 0:3]
+                
 
+            sphere_vel = torch.nn.functional.normalize(self.sphere_target_pos[env_ids] - self.sphere_source_pos[env_ids])
+            self.initial_root_states[sphere_indices.long(), 7:10] = sphere_vel
+
+            
         #leaving below in as that is what it used to be but documentaiton says call once
         #even though it worked
         # self.gym.set_actor_root_state_tensor_indexed(self.sim,
@@ -470,10 +530,12 @@ class Pentapede(VecTask):
                                                      gymtorch.unwrap_tensor(self.initial_root_states),
                                                      gymtorch.unwrap_tensor(full_indices), 2*len(env_ids))
 
-
+        #TODO is this needed if set_dof_position_target_tensor is called in pre_physics? 
+        #maybe just for first reset_idx, but otherwise not sure if we are also setting joint position
+        #actually, the one above is just pos not vel, so maybe this is needed
         self.gym.set_dof_state_tensor_indexed(self.sim,
-                                              gymtorch.unwrap_tensor(self.dof_state),
-                                              gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
+                                            gymtorch.unwrap_tensor(self.dof_state),
+                                            gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
