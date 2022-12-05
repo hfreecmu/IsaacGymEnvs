@@ -131,7 +131,7 @@ class IsaacGymPreview2Wrapper(WrapperMix):
         :return: The state, the reward, the done flag, and the info
         :rtype: tuple of torch.Tensor and any other info
         """
-        self._obs_buf, rew_buf1, rew_buf2, reset_buf, info = self._env.step(actions)
+        self._obs_buf, rew_buf1, rew_buf2, reset_buf, info = self._env.step_mix(actions)
         return self._obs_buf, rew_buf1.view(-1, 1), rew_buf2.view(-1, 1), reset_buf.view(-1, 1), info
 
     def reset(self) -> torch.Tensor:
@@ -177,7 +177,7 @@ class IsaacGymPreview3Wrapper(WrapperMix):
         :return: The state, the reward, the done flag, and the info
         :rtype: tuple of torch.Tensor and any other info
         """
-        self._obs_dict, rew_buf1, rew_buf2, reset_buf, info = self._env.step(actions)
+        self._obs_dict, rew_buf1, rew_buf2, reset_buf, info = self._env.step_mix(actions)
         return self._obs_dict["obs"], rew_buf1.view(-1, 1), rew_buf2.view(-1, 1), reset_buf.view(-1, 1), info
 
     def reset(self) -> torch.Tensor:
