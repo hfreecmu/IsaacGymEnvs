@@ -27,9 +27,10 @@ NO_GPU = True
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
 MOVE_SPHERE_STRAIGHT = False
-MOVE_SPHERE_RANDOM = True
+MOVE_SPHERE_RANDOM = False
+USE_BOX = True
 NUM_LINES = 4
-FREEZE_PENTAPEDE = True
+FREEZE_PENTAPEDE = False
 DEBUG_IM = False
 
 assert not (MOVE_SPHERE_RANDOM and MOVE_SPHERE_STRAIGHT)
@@ -85,6 +86,10 @@ class Pentapede(VecTask):
             sphere_state = self.cfg["env"]["sphereInitState"]["pos_fixed"] + sphere_rot + sphere_v_lin + sphere_v_ang
 
         self.sphere_init_state = sphere_state
+
+        if USE_BOX:
+            self.box_pos_fixed = np.array(self.cfg["env"]["boxInitState"]["pos_fixed"])
+            self.box_pos_fixed[2] = self.cfg["env"]["boxInitState"]["boxHeight"] / 2
 
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
@@ -205,7 +210,8 @@ class Pentapede(VecTask):
         asset_options.angular_damping = 0.0
         asset_options.linear_damping = 0.0
         asset_options.armature = 0.0
-        asset_options.thickness = 0.01
+        #asset_options.thickness = 0.01
+        asset_options.thickness = 0.0005
         asset_options.disable_gravity = False
         asset_options.use_mesh_materials = True
 
@@ -238,6 +244,19 @@ class Pentapede(VecTask):
         sphere_start_pose = gymapi.Transform()
         if not USE_RANDOM_SPHERE:
             sphere_start_pose.p = gymapi.Vec3(*self.sphere_pos_fixed)
+
+        if USE_BOX:
+            box_asset_options = gymapi.AssetOptions()
+            box_asset_options.fix_base_link = True
+            box_asset_options.disable_gravity = True
+            box_asset_options.armature = 0.0
+            box_asset_options.thickness = 0.0005
+            box_width = self.cfg["env"]["boxInitState"]["boxWidth"]
+            box_height = self.cfg["env"]["boxInitState"]["boxHeight"]
+            box_asset = self.gym.create_box(self.sim, box_width, box_width, box_height, box_asset_options)
+            box_start_pose = gymapi.Transform()
+            box_start_pose.p = gymapi.Vec3(*self.box_pos_fixed)
+            box_color = [0, 0, 0]
 
         #TODO tune fov
         camera_props = gymapi.CameraProperties()
@@ -281,11 +300,15 @@ class Pentapede(VecTask):
             object_idx = self.gym.get_actor_index(env_ptr, pentapede_handle, gymapi.DOMAIN_SIM)
             self.pentapede_indices.append(object_idx)
 
-            sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 1, self.sphere_seg_id)
+            sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 3, self.sphere_seg_id)
             self.sphere_handles.append(sphere_handle)
             sphere_idx = self.gym.get_actor_index(env_ptr, sphere_handle, gymapi.DOMAIN_SIM)
             self.sphere_indices.append(sphere_idx)
             self.gym.set_rigid_body_color(env_ptr, sphere_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*sphere_color))
+
+            if USE_BOX:
+                box_handle = self.gym.create_actor(env_ptr, box_asset, box_start_pose, "obstacle", i, 2, 0)
+                self.gym.set_rigid_body_color(env_ptr, box_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*box_color))
 
             if CAMERA_ENABLED:
                 camera_handle = self.gym.create_camera_sensor(env_ptr, camera_props)
@@ -576,6 +599,7 @@ def compute_pentapede_reward(
     
     # camera position reward
     camera_pos_error = torch.sum(torch.square(sphere_pos_world[:, 0:2] - pos_world[:, 0:2]), dim=1) / torch.sum(torch.square(sphere_pos_world[:, 0:2]), dim=1)
+    # rew_cam_pos = torch.exp(-camera_pos_error/0.1) * rew_scales["camera_pos"]
     rew_cam_pos = torch.exp(-camera_pos_error/0.1) * rew_scales["camera_pos"]
     #rew_cam_pos = 0.01 + (-camera_pos_error) * rew_scales["camera_pos"]
 

@@ -43,6 +43,11 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
     speed: 0.5 # m/s
 
+  boxInitState:
+    boxWidth: 0.2
+    boxHeight: 3.0
+    pos_fixed: [1, 0, 0] # x,y [m], last value overwritten
+
   control:
     # PD Drive parameters:
     stiffness: 85.0  # [N*m/rad]
@@ -78,7 +83,7 @@ env:
 
   learn:
     # rewards
-    cameraPosRewardScale: 5.0
+    cameraPosRewardScale: 100.0
     cameraQuatRewardScale: 1.0
     #cameraQuatRewardScale: 0.001
     #cameraQuatRewardScale: 0.0
