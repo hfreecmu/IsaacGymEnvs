@@ -27,7 +27,7 @@ NO_GPU = True
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
 MOVE_SPHERE_STRAIGHT = False
-MOVE_SPHERE_RANDOM = False
+MOVE_SPHERE_RANDOM = True
 USE_BOX = True
 NUM_LINES = 4
 FREEZE_PENTAPEDE = False
@@ -80,6 +80,7 @@ class Pentapede(VecTask):
         if USE_RANDOM_SPHERE:
             self.sphere_pos_lower = np.array(self.cfg["env"]["sphereInitState"]["pos_lower"])
             self.sphere_pos_upper = np.array(self.cfg["env"]["sphereInitState"]["pos_upper"])
+            self.max_sphere_dist = self.cfg["env"]["sphereInitState"]["max_sphere_dist"]
             sphere_state = [0.0, 0.0, 0.0] + sphere_rot + sphere_v_lin + sphere_v_ang
         else:
             self.sphere_pos_fixed = self.cfg["env"]["sphereInitState"]["pos_fixed"]
@@ -90,6 +91,27 @@ class Pentapede(VecTask):
         if USE_BOX:
             self.box_pos_fixed = np.array(self.cfg["env"]["boxInitState"]["pos_fixed"])
             self.box_pos_fixed[2] = self.cfg["env"]["boxInitState"]["boxHeight"] / 2
+
+            world_spacing = self.cfg["env"]['envSpacing']
+            box_spacing = self.cfg["env"]["boxInitState"]["boxSpacing"]
+            box_safety = self.cfg["env"]["boxInitState"]["boxSafety"]
+            valid_box_positions = []
+
+            i = -world_spacing
+            while i < world_spacing:
+                i += box_spacing
+
+                j = -world_spacing
+                while j < world_spacing:
+                    j += box_spacing
+                    
+                    if (np.abs(pos[0] - i) < box_safety) and (np.abs(pos[1] - j) < box_safety):
+                        continue
+
+                    valid_box_positions.append([i, j])
+
+            self.valid_box_positions = np.array(valid_box_positions)
+            self.num_blocks = self.cfg["env"]["boxInitState"]["numBlocks"]
 
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
@@ -171,6 +193,8 @@ class Pentapede(VecTask):
 
         self.pentapede_indices = to_torch(self.pentapede_indices, dtype=torch.long, device=self.device)
         self.sphere_indices = to_torch(self.sphere_indices, dtype=torch.long, device=self.device)
+        if USE_BOX:
+            self.box_indices = to_torch(self.box_indices, dtype=torch.long, device=self.device)
 
   
         self.camera_base_dir = torch.zeros(self.num_envs, 3).to(self.device)
@@ -253,9 +277,15 @@ class Pentapede(VecTask):
             box_asset_options.thickness = 0.0005
             box_width = self.cfg["env"]["boxInitState"]["boxWidth"]
             box_height = self.cfg["env"]["boxInitState"]["boxHeight"]
-            box_asset = self.gym.create_box(self.sim, box_width, box_width, box_height, box_asset_options)
             box_start_pose = gymapi.Transform()
-            box_start_pose.p = gymapi.Vec3(*self.box_pos_fixed)
+            #box_start_pose.p = gymapi.Vec3(*self.box_pos_fixed)
+            if not  self.cfg["env"]["boxInitState"]["use_capsule"]:
+                box_asset = self.gym.create_box(self.sim, box_width, box_width, box_height, box_asset_options)
+            else:
+                box_asset = self.gym.create_capsule(self.sim, box_width / 2, box_height, box_asset_options)
+                box_start_pose.r = gymapi.Quat(0, np.sqrt(2), 0, np.sqrt(2))
+
+            
             box_color = [0, 0, 0]
 
         #TODO tune fov
@@ -284,6 +314,9 @@ class Pentapede(VecTask):
         self.pentapede_indices = []
         self.sphere_indices = []
 
+        if USE_BOX:
+            self.box_indices = []
+
         if CAMERA_ENABLED:
             self.camera_handles = []
             self.seg_images = []
@@ -307,8 +340,18 @@ class Pentapede(VecTask):
             self.gym.set_rigid_body_color(env_ptr, sphere_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*sphere_color))
 
             if USE_BOX:
-                box_handle = self.gym.create_actor(env_ptr, box_asset, box_start_pose, "obstacle", i, 2, 0)
-                self.gym.set_rigid_body_color(env_ptr, box_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*box_color))
+                box_count = 0
+                block_positions = self.get_random_block_pos()
+                box_indices = []
+                for x, y in block_positions:
+                    box_start_pose.p = gymapi.Vec3(*[x, y, self.box_pos_fixed[2]])
+                    box_handle = self.gym.create_actor(env_ptr, box_asset, box_start_pose, "obstacle_" + str(box_count), i, 2, 0)
+                    box_idx = self.gym.get_actor_index(env_ptr, box_handle, gymapi.DOMAIN_SIM)
+                    box_indices.append(box_idx)
+                    self.gym.set_rigid_body_color(env_ptr, box_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*box_color))
+                    box_count += 1
+                    
+                self.box_indices.append(box_indices)
 
             if CAMERA_ENABLED:
                 camera_handle = self.gym.create_camera_sensor(env_ptr, camera_props)
@@ -399,7 +442,12 @@ class Pentapede(VecTask):
                                                         self.sphere_pos_lower, dtype=torch.float, device=self.device)
             self.sphere_source_pos[sphere_speed_ids] = self.root_states[sphere_speed_indices.long(), 0:3]
 
-            sphere_vel = torch.nn.functional.normalize(self.sphere_target_pos[sphere_speed_ids] - self.sphere_source_pos[sphere_speed_ids])
+            sphere_dist = self.sphere_target_pos[sphere_speed_ids] - self.sphere_source_pos[sphere_speed_ids]
+            sphere_vel = torch.nn.functional.normalize(sphere_dist)
+
+            #breakpoint()
+            #self.sphere_target_pos[sphere_speed_ids] = torch.where(torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist, self.sphere_target_pos[sphere_speed_ids], self.sphere_source_pos[sphere_speed_ids] + self.max_sphere_dist*sphere_vel)
+
             clone_initial_root_states = torch.clone(self.root_states)
             clone_initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
             clone_initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
@@ -476,6 +524,23 @@ class Pentapede(VecTask):
                 line_vertices_3 = np.concatenate((sphere_pos_origin, sphere_pos_target), axis=1).flatten().tolist()
                 self.gym.add_lines(self.viewer, self.envs[i], 1, line_vertices_3, line_colors_3)
 
+            grid_line_colors = [1.0, 0.65, 0.0]
+            #TODO can make this called once
+            spacing = self.cfg["env"]['envSpacing']
+            corner_0 = np.array([[-spacing, -spacing, 0]])
+            corner_1 = np.array([[-spacing, spacing, 0]])
+            corner_2 = np.array([[spacing, spacing, 0]])
+            corner_3 = np.array([[spacing, -spacing, 0]])
+            line_corner_0 = np.concatenate((corner_0, corner_1), axis=1).flatten().tolist()
+            line_corner_1 = np.concatenate((corner_1, corner_2), axis=1).flatten().tolist()
+            line_corner_2 = np.concatenate((corner_2, corner_3), axis=1).flatten().tolist()
+            line_corner_3 = np.concatenate((corner_3, corner_0), axis=1).flatten().tolist()
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_0, grid_line_colors)
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_1, grid_line_colors)
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_2, grid_line_colors)
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_3, grid_line_colors)
+
+
         self.obs_buf[:] = compute_pentapede_observations(  # tensors
                                                         self.root_states,
                                                         self.pentapede_indices,
@@ -549,9 +614,21 @@ class Pentapede(VecTask):
         #                                              gymtorch.unwrap_tensor(sphere_indices), len(env_ids))
 
         full_indices = torch.cat((pentapede_indices, sphere_indices), dim=0)
+        num_actors = 2*len(env_ids)
+        
+        if USE_BOX:
+            box_indices = self.box_indices[env_ids].to(dtype=torch.int32) 
+            for i in range(box_indices.shape[0]):
+                block_positions = torch.as_tensor(self.get_random_block_pos(), dtype=torch.float, device=self.device)
+                self.initial_root_states[box_indices[i].long(), 0:2] = block_positions
+                self.initial_root_states[box_indices[i].long(), 2] = self.box_pos_fixed[2]
+            
+            full_indices = torch.cat((full_indices, box_indices.flatten()), dim=0)
+            num_actors = full_indices.shape[0]
+
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.initial_root_states),
-                                                     gymtorch.unwrap_tensor(full_indices), 2*len(env_ids))
+                                                     gymtorch.unwrap_tensor(full_indices), num_actors)
 
         #TODO is this needed if set_dof_position_target_tensor is called in pre_physics? 
         #maybe just for first reset_idx, but otherwise not sure if we are also setting joint position
@@ -562,6 +639,13 @@ class Pentapede(VecTask):
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+
+    def get_random_block_pos(self):
+        if self.num_blocks > self.valid_box_positions.shape[0]:
+                return self.valid_box_positions.copy()
+        else:
+            block_inds = np.random.choice(self.valid_box_positions.shape[0], size=(self.num_blocks,), replace=False)
+            return self.valid_box_positions[block_inds].copy()
 
 #####################################################################
 ###=========================jit functions=========================###
