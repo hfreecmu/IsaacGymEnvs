@@ -36,8 +36,8 @@ env:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
     pos_fixed: [2, 0, 2] # x,y,z [m]
-    pos_lower: [-3.5, -3.5, 1] # x,y,z [m]
-    pos_upper: [3.5, 3.5, 2] # x,y,z [m]
+    pos_lower: [-2, -2, 1] # x,y,z [m]
+    pos_upper: [2, 2, 1] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
@@ -49,7 +49,7 @@ env:
     stiffness: 85.0  # [N*m/rad]
     damping: 2.0     # [N*m*s/rad]
     actionScaleLeg: 0.5
-    actionScaleArm: 1.0
+    actionScaleArm: 0.0
     controlFrequencyInv: 1 # 60 Hz
 
   defaultJointAngles:  # = target angles when action = 0.0
@@ -92,7 +92,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 20
+    episodeLength_s: 10
 
   # viewer cam:
   viewer:
