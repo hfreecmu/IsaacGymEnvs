@@ -21,15 +21,19 @@ from PIL import Image as im
 #need to retune clipActions, clipObservations, actionScale, and dofPositionScale
 #possibly separate between arm and legs
 
-NO_GPU = True
+NO_GPU = False
 
 #Change cmaera enabled here and in computer obserations
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
-MOVE_SPHERE = True
+MOVE_SPHERE_STRAIGHT = False
+MOVE_SPHERE_RANDOM = True
 NUM_LINES = 4
 FREEZE_PENTAPEDE = False
 DEBUG_IM = False
+
+assert not (MOVE_SPHERE_RANDOM and MOVE_SPHERE_STRAIGHT)
+MOVE_SPHERE = (MOVE_SPHERE_RANDOM or MOVE_SPHERE_STRAIGHT)
 
 class Pentapede(VecTask):
 
@@ -75,6 +79,7 @@ class Pentapede(VecTask):
         if USE_RANDOM_SPHERE:
             self.sphere_pos_lower = np.array(self.cfg["env"]["sphereInitState"]["pos_lower"])
             self.sphere_pos_upper = np.array(self.cfg["env"]["sphereInitState"]["pos_upper"])
+            self.max_sphere_dist = self.cfg["env"]["sphereInitState"]["max_sphere_dist"]
             sphere_state = [0.0, 0.0, 0.0] + sphere_rot + sphere_v_lin + sphere_v_ang
         else:
             self.sphere_pos_fixed = self.cfg["env"]["sphereInitState"]["pos_fixed"]
@@ -108,6 +113,10 @@ class Pentapede(VecTask):
 
         if MOVE_SPHERE:
             self.sphere_speed = self.cfg["env"]["sphereInitState"]["speed"]# * self.dt
+
+        if MOVE_SPHERE_RANDOM:
+            self.sphere_target_pos = torch.zeros((self.num_envs, 3)).float().to(self.device)
+            self.sphere_source_pos = torch.zeros((self.num_envs, 3)).float().to(self.device)
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -342,8 +351,33 @@ class Pentapede(VecTask):
         self.compute_reward(self.actions)
 
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-        if len(env_ids) > 0:
-            self.reset_idx(env_ids)
+        if MOVE_SPHERE_RANDOM:
+            #TODO I know technically wrong if random target position is close to current position
+            #but such a small and rare case I do not care that much
+            
+            sphere_vel = self.sphere_target_pos - self.sphere_source_pos
+            des_sphere_vel = self.sphere_target_pos - self.root_states[self.sphere_indices, 0:3]
+            dot_prod = torch.sum(sphere_vel*des_sphere_vel, dim=-1)
+            sphere_speed_ids = torch.where(dot_prod <= 0.0, 1.0, 0.0).nonzero(as_tuple=False).squeeze(-1)
+            is_not_in_env_id = [False if i.item() in env_ids else True for i in sphere_speed_ids]
+            sphere_speed_ids = sphere_speed_ids[is_not_in_env_id]
+ 
+            sphere_speed_indices = self.sphere_indices[sphere_speed_ids].to(dtype=torch.int32) 
+            self.sphere_target_pos[sphere_speed_ids] = torch.as_tensor(np.random.rand(len(sphere_speed_ids), 3) * (self.sphere_pos_upper-self.sphere_pos_lower) + \
+                                                        self.sphere_pos_lower, dtype=torch.float, device=self.device)
+            self.sphere_source_pos[sphere_speed_ids] = self.root_states[sphere_speed_indices.long(), 0:3]
+            sphere_dist = self.sphere_target_pos[sphere_speed_ids] - self.sphere_source_pos[sphere_speed_ids]
+            sphere_vel = torch.nn.functional.normalize(sphere_dist)
+            self.sphere_target_pos[sphere_speed_ids] = torch.where((torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist).reshape(-1, 1), self.sphere_target_pos[sphere_speed_ids], self.sphere_source_pos[sphere_speed_ids] + self.max_sphere_dist*sphere_vel)
+            
+            self.initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
+            self.initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
+        else:
+            sphere_speed_ids = []
+            sphere_speed_indices = []
+
+        if (len(env_ids) > 0) or (len(sphere_speed_ids) > 0):
+            self.reset_idx(env_ids, sphere_speed_indices, sphere_speed_ids)
 
     def compute_reward(self, actions):
         self.rew_buf1[:], self.rew_buf2[:], self.reset_buf[:] = compute_pentapede_reward(
@@ -403,6 +437,28 @@ class Pentapede(VecTask):
             line_vertices_2 = np.concatenate((camera_pos_debug, sphere_pos_world), axis=1).flatten().tolist()
             self.gym.add_lines(self.viewer, self.envs[i], 1, line_vertices_2, line_colors_2)
 
+            if MOVE_SPHERE_RANDOM:
+                line_colors_3 = [1.0, 0.0, 0.0]
+                sphere_pos_origin = self.sphere_source_pos[i:i+1, 0:3].detach().cpu().numpy()
+                sphere_pos_target = self.sphere_target_pos[i:i+1, 0:3].detach().cpu().numpy()
+                line_vertices_3 = np.concatenate((sphere_pos_origin, sphere_pos_target), axis=1).flatten().tolist()
+                self.gym.add_lines(self.viewer, self.envs[i], 1, line_vertices_3, line_colors_3)
+            grid_line_colors = [1.0, 0.65, 0.0]
+            #TODO can make this called once
+            spacing = self.cfg["env"]['envSpacing']
+            corner_0 = np.array([[-spacing, -spacing, 0]])
+            corner_1 = np.array([[-spacing, spacing, 0]])
+            corner_2 = np.array([[spacing, spacing, 0]])
+            corner_3 = np.array([[spacing, -spacing, 0]])
+            line_corner_0 = np.concatenate((corner_0, corner_1), axis=1).flatten().tolist()
+            line_corner_1 = np.concatenate((corner_1, corner_2), axis=1).flatten().tolist()
+            line_corner_2 = np.concatenate((corner_2, corner_3), axis=1).flatten().tolist()
+            line_corner_3 = np.concatenate((corner_3, corner_0), axis=1).flatten().tolist()
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_0, grid_line_colors)
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_1, grid_line_colors)
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_2, grid_line_colors)
+            self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_3, grid_line_colors)
+
         self.obs_buf[:] = compute_pentapede_observations(  # tensors
                                                         self.root_states,
                                                         self.pentapede_indices,
@@ -429,9 +485,16 @@ class Pentapede(VecTask):
     #could be reason for bug of moving this somewhere else and can possibly put it back
     #it is not turns out but leaving this comment here
     #7db807a55a81b7979f46bbf86430088cd57e56de
-    def reset_idx(self, env_ids):
-        if len(env_ids) == 0:
+    def reset_idx(self, env_ids, sphere_speed_indices=[], sphere_speed_ids=[]):
+        if (len(env_ids) <= 0) and (len(sphere_speed_indices) <= 0):
             return
+
+        if len(env_ids) > 0 and len(sphere_speed_indices) > 0:
+            pass
+        
+        for i in env_ids:
+            if i.item() in sphere_speed_ids:
+                raise RuntimeError('here')
 
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids]
         self.dof_vel[env_ids] = 0
@@ -451,13 +514,23 @@ class Pentapede(VecTask):
             self.initial_root_states[sphere_indices.long(), 0:3] = sphere_pos
 
 
-        if MOVE_SPHERE:
+        if MOVE_SPHERE_STRAIGHT:
             random_vel = np.random.rand(len(env_ids), 3)*2 - 1
             random_vel[:, 2] = 0
             random_vel = (self.sphere_speed * random_vel / np.expand_dims(np.linalg.norm(random_vel, axis=1), axis=1)).tolist()
             random_vel = to_torch(random_vel, device=self.device, requires_grad=False)
 
             self.initial_root_states[sphere_indices.long(), 7:10] = random_vel
+        elif MOVE_SPHERE_RANDOM:
+            self.sphere_target_pos[env_ids] = torch.as_tensor(np.random.rand(len(env_ids), 3) * (self.sphere_pos_upper-self.sphere_pos_lower) + \
+                                              self.sphere_pos_lower, dtype=torch.float, device=self.device)
+            
+            self.sphere_source_pos[env_ids] = self.initial_root_states[sphere_indices.long(), 0:3]
+                
+            sphere_dist = self.sphere_target_pos[env_ids] - self.sphere_source_pos[env_ids]
+            sphere_vel = torch.nn.functional.normalize(sphere_dist)
+            self.sphere_target_pos[env_ids] = torch.where((torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist).reshape(-1, 1), self.sphere_target_pos[env_ids], self.sphere_source_pos[env_ids] + self.max_sphere_dist*sphere_vel)
+            self.initial_root_states[sphere_indices.long(), 7:10] = sphere_vel
 
         #leaving below in as that is what it used to be but documentaiton says call once
         #even though it worked
@@ -466,14 +539,20 @@ class Pentapede(VecTask):
         #                                              gymtorch.unwrap_tensor(sphere_indices), len(env_ids))
 
         full_indices = torch.cat((pentapede_indices, sphere_indices), dim=0)
+        num_actors = 2*len(env_ids)
+        
+        if len(sphere_speed_indices) > 0:
+            full_indices = torch.cat((full_indices, sphere_speed_indices.to(dtype=torch.int32) ), dim=0)
+            num_actors = full_indices.shape[0]
+        
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.initial_root_states),
-                                                     gymtorch.unwrap_tensor(full_indices), 2*len(env_ids))
+                                                     gymtorch.unwrap_tensor(full_indices), num_actors)
 
-
-        self.gym.set_dof_state_tensor_indexed(self.sim,
-                                              gymtorch.unwrap_tensor(self.dof_state),
-                                              gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
+        if len(env_ids) > 0:
+            self.gym.set_dof_state_tensor_indexed(self.sim,
+                                                  gymtorch.unwrap_tensor(self.dof_state),
+                                                  gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
