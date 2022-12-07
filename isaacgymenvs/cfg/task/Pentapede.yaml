@@ -42,6 +42,7 @@ env:
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
     speed: 0.5 # m/s
+    max_sphere_dist: 3.0
 
   control:
     # PD Drive parameters:
