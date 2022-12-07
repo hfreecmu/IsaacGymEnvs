@@ -98,11 +98,11 @@ class Pentapede(VecTask):
             valid_box_positions = []
 
             i = -world_spacing
-            while i < world_spacing:
+            while i < world_spacing - box_spacing:
                 i += box_spacing
 
                 j = -world_spacing
-                while j < world_spacing:
+                while j < world_spacing - box_spacing:
                     j += box_spacing
                     
                     if (np.abs(pos[0] - i) < box_safety) and (np.abs(pos[1] - j) < box_safety):
@@ -119,9 +119,9 @@ class Pentapede(VecTask):
         width = self.cfg["env"]["camera"]["image_width"]
         height = self.cfg["env"]["camera"]["image_height"]
         if CAMERA_ENABLED and not NO_GPU:
-            self.cfg["env"]["numObservations"] = 128 + width*height
+            self.cfg["env"]["numObservations"] = 92 + width*height
         else:
-            self.cfg["env"]["numObservations"] = 128
+            self.cfg["env"]["numObservations"] = 92
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -430,7 +430,7 @@ class Pentapede(VecTask):
             dot_prod = torch.sum(sphere_vel*des_sphere_vel, dim=-1)
             sphere_speed_ids = torch.where(dot_prod <= 0.0, 1.0, 0.0).nonzero(as_tuple=False).squeeze(-1)
 
-            is_not_in_env_id = [False if i in env_ids else True for i in sphere_speed_ids]
+            is_not_in_env_id = [False if i.item() in env_ids else True for i in sphere_speed_ids]
             sphere_speed_ids = sphere_speed_ids[is_not_in_env_id]
  
             #WARNING WARNING WARNING
@@ -447,21 +447,21 @@ class Pentapede(VecTask):
 
             self.sphere_target_pos[sphere_speed_ids] = torch.where((torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist).reshape(-1, 1), self.sphere_target_pos[sphere_speed_ids], self.sphere_source_pos[sphere_speed_ids] + self.max_sphere_dist*sphere_vel)
 
-            #clone_initial_root_states = torch.clone(self.root_states)
-            #clone_initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
-            #clone_initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
+            # clone_initial_root_states = torch.clone(self.root_states)
+            # clone_initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
+            # clone_initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
 
             self.initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
             self.initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
-
-            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            #                                              gymtorch.unwrap_tensor(clone_initial_root_states),
-            #                                              gymtorch.unwrap_tensor(sphere_speed_indices), len(sphere_speed_indices))
+            
+            #self.gym.set_actor_root_state_tensor_indexed(self.sim,
+            #                                             gymtorch.unwrap_tensor(clone_initial_root_states),
+            #                                             gymtorch.unwrap_tensor(sphere_speed_indices), len(sphere_speed_indices))
         else:
             sphere_speed_ids = []
 
         if (len(env_ids) > 0) or (len(sphere_speed_ids) > 0):
-            self.reset_idx(env_ids, sphere_speed_ids)
+            self.reset_idx(env_ids, sphere_speed_indices, sphere_speed_ids)
 
     def compute_reward(self, actions):
         self.rew_buf1[:], self.rew_buf2[:], self.reset_buf[:] = compute_pentapede_reward(
@@ -573,9 +573,16 @@ class Pentapede(VecTask):
     #could be reason for bug of moving this somewhere else and can possibly put it back
     #it is not turns out but leaving this comment here
     #7db807a55a81b7979f46bbf86430088cd57e56de
-    def reset_idx(self, env_ids, sphere_speed_ids=[]):
-        if (len(env_ids) <= 0) and (len(sphere_speed_ids) <= 0):
+    def reset_idx(self, env_ids, sphere_speed_indices=[], sphere_speed_ids=[]):
+        if (len(env_ids) <= 0) and (len(sphere_speed_indices) <= 0):
             return
+
+        if len(env_ids) > 0 and len(sphere_speed_indices) > 0:
+            pass
+
+        for i in env_ids:
+            if i.item() in sphere_speed_ids:
+                raise RuntimeError('here')
 
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids]
         self.dof_vel[env_ids] = 0
@@ -635,8 +642,8 @@ class Pentapede(VecTask):
             full_indices = torch.cat((full_indices, box_indices.flatten()), dim=0)
             num_actors = full_indices.shape[0]
 
-        if len(sphere_speed_ids) > 0:
-            full_indices = torch.cat((full_indices, sphere_speed_ids.to(dtype=torch.int32) ), dim=0)
+        if len(sphere_speed_indices) > 0:
+            full_indices = torch.cat((full_indices, sphere_speed_indices.to(dtype=torch.int32) ), dim=0)
             num_actors = full_indices.shape[0]
 
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
@@ -696,7 +703,7 @@ def compute_pentapede_reward(
     sphere_dir_cam = quat_rotate_inverse(camera_quat, normalize(sphere_pos_world - camera_pos_world))
     
     # camera position reward
-    camera_pos_error = torch.sum(torch.square(sphere_pos_world[:, 0:2] - pos_world[:, 0:2]), dim=1) / torch.sum(torch.square(sphere_pos_world[:, 0:2]), dim=1)
+    camera_pos_error = torch.sum(torch.square(sphere_pos_world[:, 0:2] - pos_world[:, 0:2]), dim=1)# / torch.sum(torch.square(sphere_pos_world[:, 0:2]), dim=1)
     # rew_cam_pos = torch.exp(-camera_pos_error/0.1) * rew_scales["camera_pos"]
     rew_cam_pos = torch.exp(-camera_pos_error/0.1) * rew_scales["camera_pos"]
     #rew_cam_pos = 0.01 + (-camera_pos_error) * rew_scales["camera_pos"]

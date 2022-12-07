@@ -10,7 +10,7 @@ env:
   numEnvs: ${resolve_default:2048,${...num_envs}}
   #numEnvs: ${resolve_default:128,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
-  envSpacing: 8.  # [m]
+  envSpacing: 6.  # [m]
 
   clipObservations: 5.0
   clipActions: 1.0
@@ -36,8 +36,8 @@ env:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
     pos_fixed: [2, 0, 2] # x,y,z [m]
-    pos_lower: [-8, -8, 0.5] # x,y,z [m]
-    pos_upper: [8, 8, 1.5] # x,y,z [m]
+    pos_lower: [-5, -5, 0.5] # x,y,z [m]
+    pos_upper: [5, 5, 1.5] # x,y,z [m]
     max_sphere_dist: 4.0
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
@@ -48,8 +48,8 @@ env:
     boxWidth: 0.2
     boxHeight: 3.0
     boxSpacing: 2.0
-    boxSafety: 2.0
-    numBlocks: 20
+    boxSafety: 1.0
+    numBlocks: 8
     pos_fixed: [1.0, 0.0, 0.0] # x,y [m], last value overwritten
     use_capsule: True
 
@@ -88,7 +88,7 @@ env:
 
   learn:
     # rewards
-    cameraPosRewardScale: 100.0
+    cameraPosRewardScale: 5.0
     cameraQuatRewardScale: 1.0
     #cameraQuatRewardScale: 0.001
     #cameraQuatRewardScale: 0.0
@@ -101,7 +101,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 10
+    episodeLength_s: 20
 
   # viewer cam:
   viewer:
