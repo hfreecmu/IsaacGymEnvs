@@ -90,7 +90,7 @@ models_ppo["value"] = models_ppo["policy"]  # same instance: shared model
 cfg_ppo = PPO_DEFAULT_CONFIG.copy()
 cfg_ppo["rollouts"] = 24  # memory_size
 cfg_ppo["learning_epochs"] = 5
-cfg_ppo["mini_batches"] = 3  # 24 * 4096 / 32768
+cfg_ppo["mini_batches"] = 6  # 24 * 4096 / 32768 but we use 24 * 2048 / 8192
 cfg_ppo["discount_factor"] = 0.99
 cfg_ppo["lambda"] = 0.95
 cfg_ppo["learning_rate"] = 3e-4
@@ -123,7 +123,7 @@ agent = PPO_Mix(models=models_ppo,
 
 
 # Configure and instantiate the RL trainer
-cfg_trainer = {"timesteps": 24000, "headless": True}
+cfg_trainer = {"timesteps": 38400, "headless": True}
 trainer = SequentialTrainerMix(cfg=cfg_trainer, env=env, agents=agent)
 
 # start training

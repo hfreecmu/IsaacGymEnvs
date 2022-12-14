@@ -31,7 +31,7 @@ NO_GPU = False
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
 MOVE_SPHERE_STRAIGHT = False
-MOVE_SPHERE_RANDOM = True
+MOVE_SPHERE_RANDOM = False
 USE_BOX = True
 NUM_LINES = 4
 FREEZE_PENTAPEDE = False
@@ -783,7 +783,7 @@ def compute_pentapede_reward(
     #adjust reward for fallen agents
     #TODO change -2.0 to configurable param
     #total_reward = torch.where(reset, torch.ones_like(total_reward) * -10.0, total_reward)
-    rew_lin_vel = torch.where(reset, torch.ones_like(rew_lin_vel) * -10.0, rew_lin_vel)
+    #rew_lin_vel = torch.where(reset, torch.ones_like(rew_lin_vel) * -10.0, rew_lin_vel)
 
     #total_reward = torch.clip(total_reward, 0., None)
 
@@ -791,8 +791,8 @@ def compute_pentapede_reward(
     reset = reset | time_out
 
     rew_cam_pos = rew_lin_vel
-    #return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
-    return rew_cam_pos.detach(), torch.zeros_like(rew_cam_pos.detach()), reset
+    return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
+    #return rew_cam_pos.detach(), torch.zeros_like(rew_cam_pos.detach()), reset
     #return total_reward.detach(), torch.zeros_like(total_reward.detach()), reset   # (leg reward, arm reward, reset)
     # return total_reward.detach(), reset
 

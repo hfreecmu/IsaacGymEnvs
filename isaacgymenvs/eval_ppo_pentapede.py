@@ -99,7 +99,7 @@ models_ppo["value"] = models_ppo["policy"]  # same instance: shared model
 cfg_ppo = PPO_DEFAULT_CONFIG.copy()
 cfg_ppo["rollouts"] = 24  # memory_size
 cfg_ppo["learning_epochs"] = 5
-cfg_ppo["mini_batches"] = 3  # 24 * 4096 / 32768
+cfg_ppo["mini_batches"] = 6  # 24 * 4096 / 32768 but we use 24 * 2048 / 8192
 cfg_ppo["discount_factor"] = 0.99
 cfg_ppo["lambda"] = 0.95
 cfg_ppo["learning_rate"] = 3e-4
@@ -130,7 +130,7 @@ agent = PPO_Mix(models=models_ppo,
                 action_space=env.action_space,
                 device=device)
 
-agent.load('/home/frc-ag-3/harry_ws/courses/dlr/IsaacGymEnvs/isaacgymenvs/runs/22-12-13_21-24-53-194714_PPO_Mix/checkpoints/agent_14400.pt')
+agent.load('/home/frc-ag-3/harry_ws/courses/dlr/IsaacGymEnvs/isaacgymenvs/runs/22-12-14_13-59-11-335377_PPO_Mix/checkpoints/best_agent.pt')
 
 
 # Configure and instantiate the RL trainer
