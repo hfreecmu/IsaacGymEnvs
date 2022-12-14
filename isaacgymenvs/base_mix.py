@@ -234,8 +234,7 @@ class TrainerMix():
                 # write data to TensorBoard
                 super(type(self.agents), self.agents).record_transition(states=states,
                                                                         actions=actions,
-                                                                        rewards1=rewards1,
-                                                                        rewards2=rewards2,
+                                                                        rewards=rewards1 + rewards2,
                                                                         next_states=next_states,
                                                                         dones=dones,
                                                                         infos=infos,
