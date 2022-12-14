@@ -31,7 +31,8 @@ NO_GPU = False
 CAMERA_ENABLED = False
 USE_RANDOM_SPHERE = True
 MOVE_SPHERE_STRAIGHT = False
-MOVE_SPHERE_RANDOM = False
+MOVE_SPHERE_RANDOM = True
+USE_BOX = True
 NUM_LINES = 4
 FREEZE_PENTAPEDE = False
 DEBUG_IM = False
@@ -57,6 +58,7 @@ class Pentapede(VecTask):
         self.dof_vel_scale = self.cfg["env"]["learn"]["dofVelocityScale"]
         self.sphere_cam_dir_scale = self.cfg["env"]["learn"]["sphereCamDirScale"]
         self.sphere_actor_dir_scale = self.cfg["env"]["learn"]["sphereActorDirScale"]
+        self.box_actor_dir_scale = self.cfg["env"]["learn"]["boxActorDirScale"]
         self.action_scale_leg = self.cfg["env"]["control"]["actionScaleLeg"]
         #self.action_scale_arm = self.cfg["env"]["control"]["actionScaleArm"]
 
@@ -95,6 +97,31 @@ class Pentapede(VecTask):
 
         self.sphere_init_state = sphere_state
 
+        if USE_BOX:
+            self.box_pos_fixed = np.array(self.cfg["env"]["boxInitState"]["pos_fixed"])
+            self.box_pos_fixed[2] = self.cfg["env"]["boxInitState"]["boxHeight"] / 2
+
+            world_spacing = self.cfg["env"]['envSpacing']
+            box_spacing = self.cfg["env"]["boxInitState"]["boxSpacing"]
+            box_safety = self.cfg["env"]["boxInitState"]["boxSafety"]
+            valid_box_positions = []
+
+            i = -world_spacing
+            while i < world_spacing - box_spacing:
+                i += box_spacing
+
+                j = -world_spacing
+                while j < world_spacing - box_spacing:
+                    j += box_spacing
+                    
+                    if (np.abs(pos[0] - i) < box_safety) and (np.abs(pos[1] - j) < box_safety):
+                        continue
+
+                    valid_box_positions.append([i, j])
+
+            self.valid_box_positions = np.array(valid_box_positions)
+            self.num_blocks = self.cfg["env"]["boxInitState"]["numBlocks"]
+
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
@@ -106,7 +133,7 @@ class Pentapede(VecTask):
         if CAMERA_ENABLED and not NO_GPU:
             self.cfg["env"]["numObservations"] = 68 + width*height
         else:
-            self.cfg["env"]["numObservations"] = 70
+            self.cfg["env"]["numObservations"] = 100#70
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -193,7 +220,8 @@ class Pentapede(VecTask):
 
         self.pentapede_indices = to_torch(self.pentapede_indices, dtype=torch.long, device=self.device)
         self.sphere_indices = to_torch(self.sphere_indices, dtype=torch.long, device=self.device)
-
+        if USE_BOX:
+            self.box_indices = to_torch(self.box_indices, dtype=torch.long, device=self.device)
   
         self.camera_base_dir = torch.zeros(self.num_envs, 3).to(self.device)
 
@@ -266,6 +294,25 @@ class Pentapede(VecTask):
         if not USE_RANDOM_SPHERE:
             sphere_start_pose.p = gymapi.Vec3(*self.sphere_pos_fixed)
 
+        if USE_BOX:
+            box_asset_options = gymapi.AssetOptions()
+            box_asset_options.fix_base_link = True
+            box_asset_options.disable_gravity = True
+            box_asset_options.armature = 0.0
+            box_asset_options.thickness = 0.0005
+            box_width = self.cfg["env"]["boxInitState"]["boxWidth"]
+            box_height = self.cfg["env"]["boxInitState"]["boxHeight"]
+            box_start_pose = gymapi.Transform()
+            #box_start_pose.p = gymapi.Vec3(*self.box_pos_fixed)
+            if not  self.cfg["env"]["boxInitState"]["use_capsule"]:
+                box_asset = self.gym.create_box(self.sim, box_width, box_width, box_height, box_asset_options)
+            else:
+                box_asset = self.gym.create_capsule(self.sim, box_width / 2, box_height, box_asset_options)
+                box_start_pose.r = gymapi.Quat(0, np.sqrt(2), 0, np.sqrt(2))
+
+            
+            box_color = [0, 0, 0]
+
         #TODO tune fov
         camera_props = gymapi.CameraProperties()
         camera_props.width = self.cfg["env"]["camera"]["image_width"]
@@ -292,6 +339,10 @@ class Pentapede(VecTask):
         self.pentapede_indices = []
         self.sphere_indices = []
 
+        if USE_BOX:
+            self.box_handles = []
+        self.box_indices = []
+
         if CAMERA_ENABLED:
             self.camera_handles = []
             self.seg_images = []
@@ -308,11 +359,28 @@ class Pentapede(VecTask):
             object_idx = self.gym.get_actor_index(env_ptr, pentapede_handle, gymapi.DOMAIN_SIM)
             self.pentapede_indices.append(object_idx)
 
-            sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 1, self.sphere_seg_id)
+            sphere_handle = self.gym.create_actor(env_ptr, sphere_asset, sphere_start_pose, "sphere", i, 3, self.sphere_seg_id)
             self.sphere_handles.append(sphere_handle)
             sphere_idx = self.gym.get_actor_index(env_ptr, sphere_handle, gymapi.DOMAIN_SIM)
             self.sphere_indices.append(sphere_idx)
             self.gym.set_rigid_body_color(env_ptr, sphere_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*sphere_color))
+
+            if USE_BOX:
+                box_count = 0
+                block_positions = self.get_random_block_pos()
+                box_handles = []
+                box_indices = []
+                for x, y in block_positions:
+                    box_start_pose.p = gymapi.Vec3(*[x, y, self.box_pos_fixed[2]])
+                    box_handle = self.gym.create_actor(env_ptr, box_asset, box_start_pose, "obstacle_" + str(box_count), i, 2, 0)
+                    box_idx = self.gym.get_actor_index(env_ptr, box_handle, gymapi.DOMAIN_SIM)
+                    box_handles.append(box_handle)
+                    box_indices.append(box_idx)
+                    self.gym.set_rigid_body_color(env_ptr, box_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(*box_color))
+                    box_count += 1
+                    
+                self.box_handles.append(box_handles)
+                self.box_indices.append(box_indices)
 
             if CAMERA_ENABLED:
                 camera_handle = self.gym.create_camera_sensor(env_ptr, camera_props)
@@ -524,6 +592,10 @@ class Pentapede(VecTask):
                                                         self.lin_vel_scale,
                                                         self.ang_vel_scale,
                                                         self.gravity_vec,
+                                                        USE_BOX,
+                                                        self.box_pos_fixed[2],
+                                                        self.box_indices,
+                                                        self.box_actor_dir_scale,
                                                         self.debug_count
         )
 
@@ -586,6 +658,16 @@ class Pentapede(VecTask):
 
         full_indices = torch.cat((pentapede_indices, sphere_indices), dim=0)
         num_actors = 2*len(env_ids)
+
+        if USE_BOX:
+            box_indices = self.box_indices[env_ids].to(dtype=torch.int32) 
+            for i in range(box_indices.shape[0]):
+                block_positions = torch.as_tensor(self.get_random_block_pos(), dtype=torch.float, device=self.device)
+                self.initial_root_states[box_indices[i].long(), 0:2] = block_positions
+                self.initial_root_states[box_indices[i].long(), 2] = self.box_pos_fixed[2]
+            
+            full_indices = torch.cat((full_indices, box_indices.flatten()), dim=0)
+            num_actors = full_indices.shape[0]
         
         if len(sphere_speed_indices) > 0:
             full_indices = torch.cat((full_indices, sphere_speed_indices.to(dtype=torch.int32) ), dim=0)
@@ -602,6 +684,14 @@ class Pentapede(VecTask):
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+
+    def get_random_block_pos(self):
+        if self.num_blocks > self.valid_box_positions.shape[0]:
+                return self.valid_box_positions.copy()
+        else:
+            block_inds = np.random.choice(self.valid_box_positions.shape[0], size=(self.num_blocks,), replace=False)
+            return self.valid_box_positions[block_inds].copy()
+
 
 #####################################################################
 ###=========================jit functions=========================###
@@ -692,7 +782,8 @@ def compute_pentapede_reward(
 
     #adjust reward for fallen agents
     #TODO change -2.0 to configurable param
-    #total_reward = torch.where(reset, torch.ones_like(total_reward) * -2.0, total_reward)
+    #total_reward = torch.where(reset, torch.ones_like(total_reward) * -10.0, total_reward)
+    rew_lin_vel = torch.where(reset, torch.ones_like(rew_lin_vel) * -10.0, rew_lin_vel)
 
     #total_reward = torch.clip(total_reward, 0., None)
 
@@ -700,7 +791,8 @@ def compute_pentapede_reward(
     reset = reset | time_out
 
     rew_cam_pos = rew_lin_vel
-    return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
+    #return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
+    return rew_cam_pos.detach(), torch.zeros_like(rew_cam_pos.detach()), reset
     #return total_reward.detach(), torch.zeros_like(total_reward.detach()), reset   # (leg reward, arm reward, reset)
     # return total_reward.detach(), reset
 
@@ -726,6 +818,10 @@ def compute_pentapede_observations(root_states,
                                 lin_vel_scale,
                                 ang_vel_scale,
                                 gravity_vec,
+                                use_box,
+                                box_height,
+                                box_indices,
+                                box_actor_dir_scale,
                                 debug_count
                                 ):
 
@@ -758,6 +854,34 @@ def compute_pentapede_observations(root_states,
     base_ang_vel = quat_rotate_inverse(base_quat, root_states[pentapede_indices, 10:13]) * ang_vel_scale
     projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
 
+    if use_box:
+        num_envs, num_boxes = box_indices.shape
+        box_indices = box_indices.reshape(num_envs*num_boxes)
+        # camera_dir_world_interleave = camera_dir_world.repeat_interleave(num_boxes, 0)
+
+        # x = root_states[box_indices, 0]
+        # y = root_states[box_indices, 1]
+        # z_lower = 0.0
+        # z_upper = box_height
+
+        #in_front_wall_cam = is_wall_in_camera_view(x, y, z_lower, z_upper, camera_dir_world_interleave, dot_product_thresh)
+        
+        actor_pos_world_interleave = actor_pos_world.repeat_interleave(num_boxes, 0)
+        base_quat_interleave = base_quat.repeat_interleave(num_boxes, 0)
+        box_vec_world = root_states[box_indices, 0:3] - actor_pos_world_interleave[:]
+        box_vec_world[:, 2] = 0
+        
+        #TODO check in_front_wall_cam reshape on this
+        #box_vec_actor = quat_rotate_inverse(base_quat_interleave, box_vec_world) * in_front_wall_cam.view(-1, 1) * box_actor_dir_scale
+        box_vec_actor = quat_rotate_inverse(base_quat_interleave, box_vec_world) * box_actor_dir_scale
+
+        box_vec_actor = box_vec_actor.reshape(num_envs, num_boxes*3)
+        #in_front_wall_cam = in_front_wall_cam.reshape(num_envs, num_boxes)
+    else:
+        #in_front_wall_cam = torch.zeros(base_lin_vel.shape[0], 0, dtype=base_lin_vel.dtype, device=base_lin_vel.device)
+        box_vec_actor = torch.zeros(base_lin_vel.shape[0], 0, dtype=base_lin_vel.dtype, device=base_lin_vel.device)
+
+
     dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
     dof_vel_scaled = dof_vel * dof_vel_scale
@@ -789,6 +913,8 @@ def compute_pentapede_observations(root_states,
                          sphere_dir_cam,   # 3
                          actor_sphere_direction_actor, # 3
                          in_front_cam,                  # 1
+                         box_vec_actor,
+                         #in_front_wall_cam,
                          ), dim=-1)
 
     return obs
