@@ -7,14 +7,13 @@ physics_engine: ${..physics_engine}
 enableCameraSensors: True
 
 env:
-  numEnvs: ${resolve_default:2048,${...num_envs}}
-  #numEnvs: ${resolve_default:128,${...num_envs}}
+  #numEnvs: ${resolve_default:2048,${...num_envs}}
+  numEnvs: ${resolve_default:1024,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
 
   clipObservations: 5.0
   clipActions: 1.0
-  clipDistImage: 3.0
 
   camera_link: "wx250s/gripper_link"
   #If use below need to remove collapse_fix_joins in pentapede.py
@@ -36,8 +35,8 @@ env:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
     pos_fixed: [2, 0, 2] # x,y,z [m]
-    pos_lower: [-3.5, -3.5, 1] # x,y,z [m]
-    pos_upper: [3.5, 3.5, 2] # x,y,z [m]
+    pos_lower: [-2, -2, 2] # x,y,z [m]
+    pos_upper: [2, 2, 2] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
@@ -49,8 +48,16 @@ env:
     stiffness: 85.0  # [N*m/rad]
     damping: 2.0     # [N*m*s/rad]
     actionScaleLeg: 0.5
-    actionScaleArm: 1.0
+    #actionScaleArm: 1.0
     controlFrequencyInv: 1 # 60 Hz
+  
+    actionScaleArms:
+      waist: 3.14
+      shoulder: 1.0
+      elbow: 1.0
+      forearm_roll: 3.14
+      wrist_angle: 1.0
+      wrist_rotate: 1.0
 
   defaultJointAngles:  # = target angles when action = 0.0
     LF_HAA: 0.03    # [rad]
@@ -79,20 +86,21 @@ env:
 
   learn:
     # rewards
-    cameraPosRewardScale: 5.0
-    cameraQuatRewardScale: 1.0
-    #cameraQuatRewardScale: 0.001
-    #cameraQuatRewardScale: 0.0
-    torqueRewardScale: -0.000025
+    cameraPosRewardScale: 2.0
+    cameraQuatRewardScale: 0.01
+    linearVelRewardScale: 2.0
+    torqueRewardScale: 0 #-0.000025
 
     # normalization
     linearVelocityScale: 2.0
     angularVelocityScale: 0.25
     dofPositionScale: 1.0
     dofVelocityScale: 0.05
+    sphereCamDirScale: 1.0
+    sphereActorDirScale: 1.0
 
     # episode length in seconds
-    episodeLength_s: 20
+    episodeLength_s: 10
 
   # viewer cam:
   viewer:
