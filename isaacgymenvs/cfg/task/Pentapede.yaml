@@ -7,8 +7,8 @@ physics_engine: ${..physics_engine}
 enableCameraSensors: True
 
 env:
-  #numEnvs: ${resolve_default:2048,${...num_envs}}
-  numEnvs: ${resolve_default:1024,${...num_envs}}
+  numEnvs: ${resolve_default:2048,${...num_envs}}
+  #numEnvs: ${resolve_default:1024,${...num_envs}}
   #numEnvs: ${resolve_default:4,${...num_envs}}
   envSpacing: 4.  # [m]
 
@@ -35,13 +35,22 @@ env:
     radius: 0.1
     color: [1.0, 0.0, 0.0]
     pos_fixed: [2, 0, 2] # x,y,z [m]
-    pos_lower: [-2, -2, 2] # x,y,z [m]
-    pos_upper: [2, 2, 2] # x,y,z [m]
+    pos_lower: [-3.8, -3.8, 0.5] # x,y,z [m]
+    pos_upper: [3.8, 3.8, 2] # x,y,z [m]
     rot: [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
     speed: 0.5 # m/s
     max_sphere_dist: 4.0
+
+  boxInitState:
+    boxWidth: 0.2
+    boxHeight: 3.0
+    boxSpacing: 1.0
+    boxSafety: 1.0
+    numBlocks: 10
+    pos_fixed: [1.0, 0.0, 0.0] # x,y [m], last value overwritten
+    use_capsule: True
 
   control:
     # PD Drive parameters:
@@ -87,7 +96,7 @@ env:
   learn:
     # rewards
     cameraPosRewardScale: 2.0
-    cameraQuatRewardScale: 0.01
+    cameraQuatRewardScale: 0.005
     linearVelRewardScale: 2.0
     torqueRewardScale: 0 #-0.000025
 
@@ -98,9 +107,10 @@ env:
     dofVelocityScale: 0.05
     sphereCamDirScale: 1.0
     sphereActorDirScale: 1.0
+    boxActorDirScale: 1.0
 
     # episode length in seconds
-    episodeLength_s: 10
+    episodeLength_s: 50
 
   # viewer cam:
   viewer:
