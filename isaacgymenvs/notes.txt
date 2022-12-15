@@ -1,0 +1,15 @@
+final_project_stationary_ball:
+stationary ball no trees
+
+final_project_moving_ball_trees:
+started with stationary ball
+fine tuned where removed quat error from reward
+fine tuned again with movement
+fine tuned third time with reset/collision penalty
+
+final_projection_stationary_ball_adv_mix:
+stationary ball with advantage mixing
+
+final_project_fixed_cam_stationary_ball:
+fixed cam stationary ball. no quat error
+

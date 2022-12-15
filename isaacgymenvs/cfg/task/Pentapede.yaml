@@ -61,12 +61,12 @@ env:
     controlFrequencyInv: 1 # 60 Hz
   
     actionScaleArms:
-      waist: 0.0
-      shoulder: 0.0
-      elbow: 0.0
-      forearm_roll: 0.0
-      wrist_angle: 0.0
-      wrist_rotate: 0.0
+      waist: 3.14
+      shoulder: 1.0
+      elbow: 1.0
+      forearm_roll: 3.14
+      wrist_angle: 1.0
+      wrist_rotate: 1.0
 
   defaultJointAngles:  # = target angles when action = 0.0
     LF_HAA: 0.03    # [rad]
