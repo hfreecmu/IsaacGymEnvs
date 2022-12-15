@@ -739,11 +739,11 @@ def compute_pentapede_reward(
 
     #TODO square or abs? For all below not just this one
     #camera_quat_error = torch.sum(torch.square(sphere_dir_cam - camera_base_dir), dim=1)
-    camera_quat_error = torch.sum(torch.square(sphere_dir_camera - camera_base_dir), dim=1)
+    ###camera_quat_error = torch.sum(torch.square(sphere_dir_camera - camera_base_dir), dim=1)
     #rew_cam_quat = torch.exp(-camera_quat_error/0.5) * rew_scales["camera_quat"]
     #rew_cam_quat = -camera_quat_error * rew_scales["camera_quat"]
     #rew_cam_quat = torch.exp(-camera_quat_error/0.25) * rew_scales["camera_quat"]
-    rew_cam_quat = (1.0 / (1.0 + camera_quat_error)) * rew_scales['camera_quat'] * in_front_cam[:, 0]
+    ###rew_cam_quat = (1.0 / (1.0 + camera_quat_error)) * rew_scales['camera_quat'] * in_front_cam[:, 0]
 
     #now root state velocity
     #linear_velocity_world = root_states[pentapede_indices, 7:9]
@@ -791,8 +791,8 @@ def compute_pentapede_reward(
     reset = reset | time_out
 
     rew_cam_pos = rew_lin_vel
-    return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
-    #return rew_cam_pos.detach(), torch.zeros_like(rew_cam_pos.detach()), reset
+    #return rew_cam_pos.detach(), rew_cam_quat.detach(), reset   # (leg reward, arm reward, reset)
+    return rew_cam_pos.detach(), torch.zeros_like(rew_cam_pos.detach()), reset
     #return total_reward.detach(), torch.zeros_like(total_reward.detach()), reset   # (leg reward, arm reward, reset)
     # return total_reward.detach(), reset
 
