@@ -1,4 +1,4 @@
-final_project_stationary_ball:
+final_project_stationary_ball_no_trees:
 stationary ball no trees
 
 final_project_moving_ball_trees:
@@ -7,9 +7,25 @@ fine tuned where removed quat error from reward
 fine tuned again with movement
 fine tuned third time with reset/collision penalty
 
-final_projection_stationary_ball_adv_mix:
+final_project_stationary_ball_adv_mix:
 stationary ball with advantage mixing
+there is quat error
+there are trees
 
 final_project_fixed_cam_stationary_ball:
 fixed cam stationary ball. no quat error
+there are trees
+
+final_project_fixed_cam_moving_ball
+fixed cam moving ball. no quat error
+there are trees
+
+final_project_moving_ball_trees_v2
+trial again moving ball with trees
+started training with stationary ball and fine tuned
+there is not quat error
+this was just another trial where it was 
+based off branches 
+final_project_fixed_cam_stationary_ball and 
+final_project_fixed_cam_moving_ball
 
