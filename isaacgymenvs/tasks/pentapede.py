@@ -119,9 +119,9 @@ class Pentapede(VecTask):
         width = self.cfg["env"]["camera"]["image_width"]
         height = self.cfg["env"]["camera"]["image_height"]
         if CAMERA_ENABLED and not NO_GPU:
-            self.cfg["env"]["numObservations"] = 128 + width*height
+            self.cfg["env"]["numObservations"] = 68 + width*height
         else:
-            self.cfg["env"]["numObservations"] = 128
+            self.cfg["env"]["numObservations"] = 68
         self.cfg["env"]["numActions"] = 18
 
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -445,23 +445,19 @@ class Pentapede(VecTask):
             sphere_dist = self.sphere_target_pos[sphere_speed_ids] - self.sphere_source_pos[sphere_speed_ids]
             sphere_vel = torch.nn.functional.normalize(sphere_dist)
 
-            self.sphere_target_pos[sphere_speed_ids] = torch.where((torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist).reshape(-1, 1), self.sphere_target_pos[sphere_speed_ids], self.sphere_source_pos[sphere_speed_ids] + self.max_sphere_dist*sphere_vel)
+            #breakpoint()
+            #self.sphere_target_pos[sphere_speed_ids] = torch.where(torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist, self.sphere_target_pos[sphere_speed_ids], self.sphere_source_pos[sphere_speed_ids] + self.max_sphere_dist*sphere_vel)
 
-            #clone_initial_root_states = torch.clone(self.root_states)
-            #clone_initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
-            #clone_initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
+            clone_initial_root_states = torch.clone(self.root_states)
+            clone_initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
+            clone_initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
 
-            self.initial_root_states[sphere_speed_indices.long(), 7:10] = sphere_vel
-            self.initial_root_states[sphere_speed_indices.long(), 0:3] = self.sphere_source_pos[sphere_speed_ids]
+            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                         gymtorch.unwrap_tensor(clone_initial_root_states),
+                                                         gymtorch.unwrap_tensor(sphere_speed_indices), len(sphere_speed_indices))
 
-            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            #                                              gymtorch.unwrap_tensor(clone_initial_root_states),
-            #                                              gymtorch.unwrap_tensor(sphere_speed_indices), len(sphere_speed_indices))
-        else:
-            sphere_speed_ids = []
-
-        if (len(env_ids) > 0) or (len(sphere_speed_ids) > 0):
-            self.reset_idx(env_ids, sphere_speed_ids)
+        if len(env_ids) > 0:
+            self.reset_idx(env_ids)
 
     def compute_reward(self, actions):
         self.rew_buf1[:], self.rew_buf2[:], self.reset_buf[:] = compute_pentapede_reward(
@@ -544,6 +540,7 @@ class Pentapede(VecTask):
             self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_2, grid_line_colors)
             self.gym.add_lines(self.viewer, self.envs[i], 1, line_corner_3, grid_line_colors)
 
+
         self.obs_buf[:] = compute_pentapede_observations(  # tensors
                                                         self.root_states,
                                                         self.pentapede_indices,
@@ -562,9 +559,6 @@ class Pentapede(VecTask):
                                                         self.dof_pos_scale,
                                                         self.dof_vel_scale,
                                                         self.sphere_indices,
-                                                        USE_BOX,
-                                                        self.box_pos_fixed[2],
-                                                        self.box_indices,
                                                         self.dot_product_thresh,
                                                         CAMERA_ENABLED
         )
@@ -573,8 +567,8 @@ class Pentapede(VecTask):
     #could be reason for bug of moving this somewhere else and can possibly put it back
     #it is not turns out but leaving this comment here
     #7db807a55a81b7979f46bbf86430088cd57e56de
-    def reset_idx(self, env_ids, sphere_speed_ids=[]):
-        if (len(env_ids) <= 0) and (len(sphere_speed_ids) <= 0):
+    def reset_idx(self, env_ids):
+        if len(env_ids) <= 0:
             return
 
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids]
@@ -608,11 +602,8 @@ class Pentapede(VecTask):
             
             self.sphere_source_pos[env_ids] = self.initial_root_states[sphere_indices.long(), 0:3]
                 
-            sphere_dist = self.sphere_target_pos[env_ids] - self.sphere_source_pos[env_ids]
-            sphere_vel = torch.nn.functional.normalize(sphere_dist)
 
-            self.sphere_target_pos[env_ids] = torch.where((torch.norm(sphere_dist, dim=1) <= self.max_sphere_dist).reshape(-1, 1), self.sphere_target_pos[env_ids], self.sphere_source_pos[env_ids] + self.max_sphere_dist*sphere_vel)
-
+            sphere_vel = torch.nn.functional.normalize(self.sphere_target_pos[env_ids] - self.sphere_source_pos[env_ids])
             self.initial_root_states[sphere_indices.long(), 7:10] = sphere_vel
 
             
@@ -635,10 +626,6 @@ class Pentapede(VecTask):
             full_indices = torch.cat((full_indices, box_indices.flatten()), dim=0)
             num_actors = full_indices.shape[0]
 
-        if len(sphere_speed_ids) > 0:
-            full_indices = torch.cat((full_indices, sphere_speed_ids.to(dtype=torch.int32) ), dim=0)
-            num_actors = full_indices.shape[0]
-
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.initial_root_states),
                                                      gymtorch.unwrap_tensor(full_indices), num_actors)
@@ -646,10 +633,9 @@ class Pentapede(VecTask):
         #TODO is this needed if set_dof_position_target_tensor is called in pre_physics? 
         #maybe just for first reset_idx, but otherwise not sure if we are also setting joint position
         #actually, the one above is just pos not vel, so maybe this is needed
-        if len(env_ids) > 0:
-            self.gym.set_dof_state_tensor_indexed(self.sim,
-                                                gymtorch.unwrap_tensor(self.dof_state),
-                                                gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
+        self.gym.set_dof_state_tensor_indexed(self.sim,
+                                            gymtorch.unwrap_tensor(self.dof_state),
+                                            gymtorch.unwrap_tensor(pentapede_indices), len(env_ids))
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
@@ -738,9 +724,6 @@ def compute_pentapede_observations(root_states,
                                 dof_pos_scale,
                                 dof_vel_scale,
                                 sphere_indices,
-                                use_box,
-                                box_height,
-                                box_indices,
                                 dot_product_thresh,
                                 camera_enabled
                                 ):
@@ -762,28 +745,6 @@ def compute_pentapede_observations(root_states,
     #TODO ones and zeros or ones and minus ones?
     in_front_cam = is_in_camera_view(sphere_dir, camera_dir_world, dot_product_thresh)
 
-    if use_box:
-        num_envs, num_boxes = box_indices.shape
-        box_indices = box_indices.reshape(num_envs*num_boxes)
-        camera_dir_world_interleave = camera_dir_world.repeat_interleave(num_boxes, 0)
-
-        x = root_states[box_indices, 0]
-        y = root_states[box_indices, 1]
-        z_lower = 0.0
-        z_upper = box_height
-
-        in_front_wall_cam = is_wall_in_camera_view(x, y, z_lower, z_upper, camera_dir_world_interleave, dot_product_thresh)
-        
-        camera_pos_interleave = camera_pos.repeat_interleave(num_boxes, 0)
-        box_vec = root_states[box_indices, 0:2] - camera_pos_interleave[:, 0:2]
-        
-        box_vec = box_vec * in_front_wall_cam.view(-1, 1)
-        box_vec = box_vec.reshape(num_envs, num_boxes*2)
-        in_front_wall_cam = in_front_wall_cam.reshape(num_envs, num_boxes)
-    else:
-        in_front_wall_cam = torch.zeros(base_lin_vel.shape[0], 0, dtype=base_lin_vel.dtype, device=base_lin_vel.device)
-        box_vec = torch.zeros(base_lin_vel.shape[0], 0, dtype=base_lin_vel.dtype, device=base_lin_vel.device)
-
     sphere_dir_cam = quat_rotate_inverse(camera_quat, sphere_dir)
     pos_dist = torch.sqrt(torch.sum(torch.square(sphere_pos_world[:, 0:2] - pos_world[:, 0:2]), dim=1).unsqueeze(-1))
 
@@ -803,21 +764,17 @@ def compute_pentapede_observations(root_states,
                          in_front_cam*sphere_dir_cam,
                          in_front_cam*pos_dist,
                          in_front_cam,
-                         box_vec,
-                         in_front_wall_cam,
                          ), dim=-1)
     else:
-        obs = torch.cat((base_lin_vel,
-                         base_ang_vel,
-                         projected_gravity,
-                         dof_pos_scaled,
-                         dof_vel_scaled,
-                         actions,
-                         in_front_cam*sphere_dir_cam,
-                         in_front_cam*pos_dist,
-                         in_front_cam,
-                         box_vec,
-                         in_front_wall_cam,
+        obs = torch.cat((base_lin_vel,                  # 3
+                         base_ang_vel,                  # 3
+                         projected_gravity,             # 3
+                         dof_pos_scaled,                # 18
+                         dof_vel_scaled,                # 18
+                         actions,                       # 18
+                         in_front_cam*sphere_dir_cam,   # 3
+                         in_front_cam*pos_dist,         # 1
+                         in_front_cam,                  # 1
                          ), dim=-1)
 
     return obs
