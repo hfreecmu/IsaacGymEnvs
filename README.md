@@ -1,7 +1,17 @@
-# Isaac Gym Benchmark Environments
+# 16884 Final Project Isaac Gym Benchmark Environments
 
+### Details
+
+This is our code for our 16884 Deep Learning for Robotics final project. The code uses the Isaac Gym simulation environment. To install Isaac Gym please
+visit https://developer.nvidia.com/isaac-gym and follow the installation instructions.
+
+As well, this repo is a fork of the Isac Gym Reinforcement Learning Environments found here https://github.com/NVIDIA-Omniverse/IsaacGymEnvs.
+Please follow the instructions below on how to install. Please see the "Additional Install Steps to run Pentapede" for an additional step
+to run our final project.
+
+
+## Isaac Gym Benchmark Environments
 [Website](https://developer.nvidia.com/isaac-gym) | [Technical Paper](https://arxiv.org/abs/2108.10470) | [Videos](https://sites.google.com/view/isaacgym-nvidia)
-
 
 ### About this repository
 
@@ -23,6 +33,14 @@ Once Isaac Gym is installed and samples work within your current python environm
 ```bash
 pip install -e .
 ```
+
+### Additional Install Steps to run Pentapede
+
+In our implementation, we modified the torch_utils.py file found in the Isaac Gym installation to determine
+if the ball was in the fov of the camera. You will need to copy the torch_utils.py file found in the root directory
+of this repo and copy it to where you Isaac Gym installation is located when you installed https://developer.nvidia.com/isaac-gym.
+The path shouold be {ISAAC_GYM_INSTALLATION_DIR}/python/isaacgym/torch_utils.py
+Otherwise, you will not be able to use the functions "is_in_camera_view".
 
 
 ### Creating an environment
