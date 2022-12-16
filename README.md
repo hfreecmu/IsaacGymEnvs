@@ -1,4 +1,4 @@
-# 16884 Final Project Isaac Gym Benchmark Environments
+# 16884 Final Project Pentapede Isaac Gym
 
 ### Details
 
